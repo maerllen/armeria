@@ -1808,15 +1808,15 @@ ${infoTableHtml}
       return;
     }
 
-    const activeUnitObj = units.find(
-      u => u.id === (canVerRelatoriosTodasEquipes && unidadeFilterUnitId ? unidadeFilterUnitId : currentUser?.unitId)
+    const issuerUnitObj =
+      units.find(u => u.id === currentUser?.unitId) ||
+      units.find(u => u.id === unidadeFilterUnitId);
+    const issuerDeptObj = departments.find(
+      d => d.id === (issuerUnitObj?.departmentId || currentUser?.departmentId || unidadeFilterDeptId)
     );
-    const activeDeptObj = departments.find(
-      d => d.id === (unidadeFilterDeptId || activeUnitObj?.departmentId || currentUser?.departmentId)
-    );
-    const unitName = activeUnitObj?.name || 'COC • Canil K9';
-    const deptName = activeDeptObj?.name || 'Polícia Civil de Minas Gerais';
-    const logoUrl = getSystemLogo(activeUnitObj, activeDeptObj);
+    const unitName = issuerUnitObj?.name || 'COC • Canil K9';
+    const deptName = issuerDeptObj?.name || 'Polícia Civil de Minas Gerais';
+    const logoUrl = getSystemLogo(issuerUnitObj, issuerDeptObj);
     const docTitle = buildStandardDocumentTitle(
       'Histórico de Relatórios da Unidade — Canil K9 (COC)',
       unitName,

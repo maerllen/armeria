@@ -893,7 +893,10 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       return;
     }
 
-    const systemLogo = getSystemLogo(selectedUnitObj, selectedDepartmentObj);
+    const issuerUnitObj = units.find(u => u.id === currentUser?.unitId) || selectedUnitObj;
+    const issuerDeptObj =
+      departments.find(d => d.id === (issuerUnitObj?.departmentId || currentUser?.departmentId)) || selectedDepartmentObj;
+    const systemLogo = getSystemLogo(issuerUnitObj, issuerDeptObj);
     const emitDate = new Date().toLocaleString('pt-BR');
 
     const vaultsToPrint = candidateAmmoVaults.filter(v => selectedVaultIdsForReport.includes(v.id));
@@ -930,7 +933,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     let currentPageNum = 0;
 
     const pagesHtml = unitGroups.map((group) => {
-      const unitLogo = getSystemLogo(group.unitObj || selectedUnitObj, group.deptObj || selectedDepartmentObj);
+      const unitLogo = systemLogo || getSystemLogo(group.unitObj || selectedUnitObj, group.deptObj || selectedDepartmentObj);
       const unitVaultIds = new Set(group.vaults.map(v => v.id));
       const unitStocks = stocks.filter(s => unitVaultIds.has(s.vaultSpaceId));
       const unitTotalQty = unitStocks.reduce((sum, s) => sum + Number(s.quantity || 0), 0);

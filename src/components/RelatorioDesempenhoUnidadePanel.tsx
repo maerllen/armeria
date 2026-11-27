@@ -20,6 +20,7 @@ import { formatMasp } from '../utils/masks';
 import { getSafeProfilePhotoUrl } from '../utils/profilePhoto';
 import {
   calculateDistributedScore,
+  computeTierRate,
   evaluateDesempenhoApproval,
   normalizeTempoAprovacaoModo
 } from '../utils/desempenhoScoring';
@@ -91,23 +92,27 @@ function maskTimeMMSS(raw: string): string {
   return `${padded.slice(0, 2)}:${padded.slice(2, 4)}`;
 }
 
-function parseTimeInputToSeconds(raw: string): number | null {
+function parseTimeInputToSeconds(raw: string, allowDecimalSeconds = false): number | null {
   const clean = String(raw || '').trim();
   if (!clean) return null;
   if (clean.includes(':')) {
-    const parts = clean.split(':').map(p => Number(p.trim()));
+    const parts = clean.split(':').map(p => Number(p.trim().replace(',', '.')));
     if (parts.length === 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
-      return Math.max(0, Math.round(parts[0] * 60 + parts[1]));
+      const total = Math.max(0, parts[0] * 60 + parts[1]);
+      return allowDecimalSeconds ? Math.round(total * 100) / 100 : Math.round(total);
     }
     return null;
   }
   const n = Number(clean.replace(',', '.'));
   if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n);
+  return allowDecimalSeconds ? Math.round(n * 100) / 100 : Math.round(n);
 }
 
-function secondsToInputString(sec?: number | null): string {
+function secondsToInputString(sec?: number | null, decimalSecondsMode = false): string {
   if (sec === undefined || sec === null || !Number.isFinite(sec)) return '';
+  if (decimalSecondsMode || !Number.isInteger(sec)) {
+    return String(Math.round(sec * 100) / 100).replace('.', ',');
+  }
   return formatSecondsCompact(sec);
 }
 
@@ -116,6 +121,7 @@ interface DraftResultCell {
   tempoInput: string;
   notaObtida: string;
   tirosEfetuados: string;
+  acertosTiros: string;
   observacoes: string;
 }
 
@@ -126,6 +132,7 @@ interface ParticipantAbsenceDraft {
 
 interface DraftDistributionTier {
   valor: string;
+  tempoSegundos: string;
   pontos: string;
 }
 
@@ -228,12 +235,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   const [mUsaDistribuicao, setMUsaDistribuicao] = useState(false);
   const [mFatorDistribuicao, setMFatorDistribuicao] = useState<FatorDistribuicaoNota>('MARCA');
   const [mRegrasDistribuicao, setMRegrasDistribuicao] = useState<DraftDistributionTier[]>([
-    { valor: '', pontos: '' }
+    { valor: '', tempoSegundos: '1', pontos: '' }
   ]);
   const [mDificuldade, setMDificuldade] = useState<DificuldadeDesempenho>('Médio');
   const [mTeveTiro, setMTeveTiro] = useState(false);
   const [mTipoArma, setMTipoArma] = useState<TipoArmaDesempenho>('Pistola');
-  const [mQtdTiros, setMQtdTiros] = useState('10');
+  const [mQtdTiros, setMQtdTiros] = useState('30');
+  const [mQtdTirosPontuados, setMQtdTirosPontuados] = useState('10');
   const [mDescricao, setMDescricao] = useState('');
   const [savingMarker, setSavingMarker] = useState(false);
 
@@ -360,6 +368,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       for (const m of activeGroup.marcadores) {
         const key = `${p.usuarioId}__${m.id}`;
         const existing = userSavedList.find(r => r.marcadorId === m.id);
+        const isShotRateMode = m.usaDistribuicaoNota && m.fatorDistribuicao === 'TIROS_TEMPO';
         nextDraft[key] = {
           valorMarca:
             existing?.valorMarca !== undefined && existing?.valorMarca !== null
@@ -369,7 +378,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
               : '',
           tempoInput:
             existing?.tempoSegundos !== undefined && existing?.tempoSegundos !== null
-              ? secondsToInputString(existing.tempoSegundos)
+              ? secondsToInputString(existing.tempoSegundos, isShotRateMode)
               : '',
           notaObtida:
             existing && !existing.ausente && existing.notaObtida !== undefined && existing.notaObtida !== null
@@ -380,6 +389,10 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
               ? String(existing.tirosEfetuados)
               : m.teveTiro && m.quantidadeTiros
               ? String(m.quantidadeTiros)
+              : '',
+          acertosTiros:
+            existing?.acertosTiros !== undefined && existing?.acertosTiros !== null
+              ? String(existing.acertosTiros)
               : '',
           observacoes: existing?.observacoes || ''
         };
@@ -406,12 +419,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     setMNotaMax('10');
     setMNotaAprov('6');
     setMUsaDistribuicao(false);
-    setMFatorDistribuicao('MARCA');
-    setMRegrasDistribuicao([{ valor: '', pontos: '' }]);
+    setMFatorDistribuicao(categoria === 'FISICO' ? 'MARCA' : 'ACERTOS');
+    setMRegrasDistribuicao([{ valor: '', tempoSegundos: '1', pontos: '' }]);
     setMDificuldade('Médio');
     setMTeveTiro(false);
     setMTipoArma('Pistola');
-    setMQtdTiros('10');
+    setMQtdTiros('30');
+    setMQtdTirosPontuados('10');
     setMDescricao('');
     setMarkerModalOpen(true);
   };
@@ -432,21 +446,31 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     setMNotaMax(String(m.notaMaxima));
     setMNotaAprov(String(m.notaAprovacao));
     const hasDist = Boolean(m.usaDistribuicaoNota && m.regrasDistribuicao && m.regrasDistribuicao.length > 0);
-    const fator: FatorDistribuicaoNota = m.fatorDistribuicao === 'TEMPO' ? 'TEMPO' : 'MARCA';
+    const defaultFator: FatorDistribuicaoNota =
+      m.categoria === 'FISICO' ? 'MARCA' : m.teveTiro ? 'ACERTOS' : 'TEMPO';
+    const fator: FatorDistribuicaoNota = m.fatorDistribuicao || defaultFator;
     setMUsaDistribuicao(hasDist);
     setMFatorDistribuicao(fator);
     setMRegrasDistribuicao(
       hasDist && m.regrasDistribuicao
         ? m.regrasDistribuicao.map(r => ({
             valor: fator === 'TEMPO' ? secondsToInputString(r.valor) : String(r.valor),
+            tempoSegundos: r.tempoSegundos != null ? String(r.tempoSegundos).replace('.', ',') : '1',
             pontos: String(r.pontos)
           }))
-        : [{ valor: '', pontos: '' }]
+        : [{ valor: '', tempoSegundos: '1', pontos: '' }]
     );
     setMDificuldade((m.dificuldade as DificuldadeDesempenho) || 'Médio');
     setMTeveTiro(m.teveTiro);
     setMTipoArma((m.tipoArma as TipoArmaDesempenho) || 'Pistola');
-    setMQtdTiros(m.quantidadeTiros != null ? String(m.quantidadeTiros) : '10');
+    setMQtdTiros(m.quantidadeTiros != null ? String(m.quantidadeTiros) : '30');
+    setMQtdTirosPontuados(
+      m.quantidadeTirosPontuados != null
+        ? String(m.quantidadeTirosPontuados)
+        : m.quantidadeTiros != null
+        ? String(m.quantidadeTiros)
+        : '10'
+    );
     setMDescricao(m.descricao || '');
     setMarkerModalOpen(true);
   };
@@ -459,7 +483,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       if (prev.length === count) return prev;
       if (prev.length > count) return prev.slice(0, count);
       const next = [...prev];
-      while (next.length < count) next.push({ valor: '', pontos: '' });
+      while (next.length < count) next.push({ valor: '', tempoSegundos: '1', pontos: '' });
       return next;
     });
   };
@@ -487,10 +511,37 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       return;
     }
 
-    let regrasParsed: Array<{ valor: number; pontos: number }> = [];
-    if (mCategoria === 'FISICO' && mUsaDistribuicao) {
+    const qtdTirosGeral = mCategoria === 'TATICO' && mTeveTiro ? Number(mQtdTiros) : null;
+    const qtdTirosPont =
+      mCategoria === 'TATICO' && mTeveTiro
+        ? mQtdTirosPontuados.trim() !== ''
+          ? Number(mQtdTirosPontuados)
+          : qtdTirosGeral
+        : null;
+    if (mCategoria === 'TATICO' && mTeveTiro) {
+      if (!qtdTirosGeral || !Number.isFinite(qtdTirosGeral) || qtdTirosGeral <= 0) {
+        notify('error', 'Informe a quantidade geral de tiros (maior que zero).');
+        return;
+      }
+      if (!qtdTirosPont || !Number.isFinite(qtdTirosPont) || qtdTirosPont <= 0) {
+        notify('error', 'Informe quantos tiros serão pontuados na prova (maior que zero).');
+        return;
+      }
+      if (qtdTirosPont > qtdTirosGeral) {
+        notify('error', `Os tiros pontuados (${qtdTirosPont}) não podem ultrapassar o total geral (${qtdTirosGeral}).`);
+        return;
+      }
+    }
+
+    const canDistribute = mCategoria === 'FISICO' || (mCategoria === 'TATICO' && (mTeveTiro || mUsaTempo));
+    let regrasParsed: Array<{ valor: number; tempoSegundos?: number; pontos: number }> = [];
+    if (canDistribute && mUsaDistribuicao) {
       if (mFatorDistribuicao === 'TEMPO' && !mUsaTempo) {
         notify('error', 'Ative o controle de tempo para distribuir pontuação por tempo.');
+        return;
+      }
+      if ((mFatorDistribuicao === 'ACERTOS' || mFatorDistribuicao === 'TIROS_TEMPO') && !(mCategoria === 'TATICO' && mTeveTiro)) {
+        notify('error', 'Ative "Teve tiro de arma de fogo" para distribuir pontuação por acertos ou tiros por segundo.');
         return;
       }
       for (let i = 0; i < mRegrasDistribuicao.length; i++) {
@@ -505,7 +556,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
           row.pontos.trim() !== '' && Number.isFinite(Number(row.pontos.trim().replace(',', '.')))
             ? Number(row.pontos.trim().replace(',', '.'))
             : null;
-        if (v === null || v < 0) {
+        if (v === null || v < 0 || (mFatorDistribuicao === 'TIROS_TEMPO' && v <= 0)) {
           notify('error', `Informe um valor válido na divisão #${i + 1} da distribuição de pontuação.`);
           return;
         }
@@ -513,7 +564,19 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
           notify('error', `Informe uma pontuação válida na divisão #${i + 1}.`);
           return;
         }
-        regrasParsed.push({ valor: v, pontos: pts });
+        if (mFatorDistribuicao === 'TIROS_TEMPO') {
+          const tSec =
+            row.tempoSegundos.trim() !== '' && Number.isFinite(Number(row.tempoSegundos.trim().replace(',', '.')))
+              ? Number(row.tempoSegundos.trim().replace(',', '.'))
+              : null;
+          if (tSec === null || tSec <= 0) {
+            notify('error', `Informe o tempo em segundos (maior que zero) na divisão #${i + 1}.`);
+            return;
+          }
+          regrasParsed.push({ valor: v, tempoSegundos: tSec, pontos: pts });
+        } else {
+          regrasParsed.push({ valor: v, pontos: pts });
+        }
       }
       if (regrasParsed.length === 0) {
         notify('error', 'Adicione ao menos uma divisão para distribuir a pontuação.');
@@ -535,13 +598,14 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       notaMinima: Number(mNotaMin.replace(',', '.')),
       notaMaxima: Number(mNotaMax.replace(',', '.')),
       notaAprovacao: Number(mNotaAprov.replace(',', '.')),
-      usaDistribuicaoNota: mCategoria === 'FISICO' ? mUsaDistribuicao : false,
-      fatorDistribuicao: mCategoria === 'FISICO' && mUsaDistribuicao ? mFatorDistribuicao : null,
-      regrasDistribuicao: mCategoria === 'FISICO' && mUsaDistribuicao ? regrasParsed : [],
+      usaDistribuicaoNota: canDistribute ? mUsaDistribuicao : false,
+      fatorDistribuicao: canDistribute && mUsaDistribuicao ? mFatorDistribuicao : null,
+      regrasDistribuicao: canDistribute && mUsaDistribuicao ? regrasParsed : [],
       dificuldade: mDificuldade,
       teveTiro: mCategoria === 'TATICO' ? mTeveTiro : false,
       tipoArma: mCategoria === 'TATICO' && mTeveTiro ? mTipoArma : null,
-      quantidadeTiros: mCategoria === 'TATICO' && mTeveTiro ? Number(mQtdTiros) : null,
+      quantidadeTiros: mCategoria === 'TATICO' && mTeveTiro ? Math.round(qtdTirosGeral || 0) : null,
+      quantidadeTirosPontuados: mCategoria === 'TATICO' && mTeveTiro ? Math.round(qtdTirosPont || 0) : null,
       descricao: mDescricao.trim() || null
     };
 
@@ -725,6 +789,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       ausente?: boolean;
       ausenciaInformada?: boolean | null;
       tirosEfetuados?: number | null;
+      acertosTiros?: number | null;
       observacoes?: string | null;
     }> = [];
 
@@ -748,6 +813,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
             ausente: true,
             ausenciaInformada: informedBool,
             tirosEfetuados: null,
+            acertosTiros: null,
             observacoes: cell?.observacoes?.trim() || null
           });
         }
@@ -760,14 +826,21 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
         if (!cell) continue;
         const valRaw = cell.valorMarca.trim().replace(',', '.');
         const valorMarca = valRaw !== '' && Number.isFinite(Number(valRaw)) ? Number(valRaw) : null;
-        const tempoSegundos = m.usaTempo ? parseTimeInputToSeconds(cell.tempoInput) : null;
+        const isShotRateMode = m.usaDistribuicaoNota && m.fatorDistribuicao === 'TIROS_TEMPO';
+        const acceptsTime = m.usaTempo || isShotRateMode;
+        const tempoSegundos = acceptsTime ? parseTimeInputToSeconds(cell.tempoInput, isShotRateMode) : null;
+        const acertosRaw = (cell.acertosTiros || '').trim();
+        const acertosTiros =
+          m.teveTiro && acertosRaw !== '' && Number.isFinite(Number(acertosRaw))
+            ? Math.max(0, Math.round(Number(acertosRaw)))
+            : null;
 
         let notaNum: number | null = null;
         const hasAutoDist = Boolean(
           m.usaDistribuicaoNota && m.fatorDistribuicao && m.regrasDistribuicao && m.regrasDistribuicao.length > 0
         );
         if (hasAutoDist) {
-          const dist = calculateDistributedScore(m, valorMarca, tempoSegundos);
+          const dist = calculateDistributedScore(m, valorMarca, tempoSegundos, acertosTiros);
           if (dist.hasInput && dist.nota !== null) {
             notaNum = dist.nota;
           }
@@ -791,6 +864,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
           ausente: false,
           ausenciaInformada: null,
           tirosEfetuados,
+          acertosTiros,
           observacoes: cell.observacoes.trim() || null
         });
       }
@@ -1536,13 +1610,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                 tempoInput: '',
                                 notaObtida: '',
                                 tirosEfetuados: '',
+                                acertosTiros: '',
                                 observacoes: ''
                               };
                               const valRaw = cell.valorMarca.trim().replace(',', '.');
                               const valorMarcaNum = valRaw !== '' && Number.isFinite(Number(valRaw)) ? Number(valRaw) : null;
-                              const timeSec = m.usaTempo ? parseTimeInputToSeconds(cell.tempoInput) : null;
-                              const tempoModo = normalizeTempoAprovacaoModo(m.tempoAprovacaoModo);
-                              const tempoOp = tempoModo === 'MAIOR_IGUAL' ? '≥' : '≤';
+                              const acertosRaw = (cell.acertosTiros || '').trim().replace(',', '.');
+                              const acertosNum = acertosRaw !== '' && Number.isFinite(Number(acertosRaw)) ? Number(acertosRaw) : null;
 
                               const hasAutoDist = Boolean(
                                 m.usaDistribuicaoNota &&
@@ -1550,9 +1624,21 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   m.regrasDistribuicao &&
                                   m.regrasDistribuicao.length > 0
                               );
+                              const isMarcaDriver = hasAutoDist && m.fatorDistribuicao === 'MARCA';
+                              const isTempoDriver = hasAutoDist && m.fatorDistribuicao === 'TEMPO';
+                              const isAcertosDriver = hasAutoDist && m.fatorDistribuicao === 'ACERTOS';
+                              const isShotRateDriver = hasAutoDist && m.fatorDistribuicao === 'TIROS_TEMPO';
+                              const needsTimeInput = Boolean(m.usaTempo || isShotRateDriver);
+
+                              const timeSec = needsTimeInput
+                                ? parseTimeInputToSeconds(cell.tempoInput, isShotRateDriver)
+                                : null;
+                              const tempoModo = normalizeTempoAprovacaoModo(m.tempoAprovacaoModo);
+                              const tempoOp = tempoModo === 'MAIOR_IGUAL' ? '≥' : '≤';
+
                               const distResult = hasAutoDist
-                                ? calculateDistributedScore(m, valorMarcaNum, timeSec)
-                                : { hasInput: false, nota: null, matchedTier: null, belowMinimumTier: false };
+                                ? calculateDistributedScore(m, valorMarcaNum, timeSec, acertosNum)
+                                : { hasInput: false, nota: null, matchedTier: null, belowMinimumTier: false, achievedRate: null };
 
                               const manualNotaNum = Number(cell.notaObtida.replace(',', '.'));
                               const effectiveNota =
@@ -1575,10 +1661,20 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                       nextValRaw !== '' && Number.isFinite(Number(nextValRaw))
                                         ? Number(nextValRaw)
                                         : null;
-                                    const nextTimeSec = m.usaTempo
-                                      ? parseTimeInputToSeconds(nextCell.tempoInput)
+                                    const nextAcertosRaw = (nextCell.acertosTiros || '').trim().replace(',', '.');
+                                    const nextAcertosNum =
+                                      nextAcertosRaw !== '' && Number.isFinite(Number(nextAcertosRaw))
+                                        ? Number(nextAcertosRaw)
+                                        : null;
+                                    const nextTimeSec = needsTimeInput
+                                      ? parseTimeInputToSeconds(nextCell.tempoInput, isShotRateDriver)
                                       : null;
-                                    const nextDist = calculateDistributedScore(m, nextValNum, nextTimeSec);
+                                    const nextDist = calculateDistributedScore(
+                                      m,
+                                      nextValNum,
+                                      nextTimeSec,
+                                      nextAcertosNum
+                                    );
                                     nextCell.notaObtida =
                                       nextDist.hasInput && nextDist.nota !== null ? String(nextDist.nota) : '';
                                   }
@@ -1589,8 +1685,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                 });
                               };
 
-                              const isMarcaDriver = hasAutoDist && m.fatorDistribuicao === 'MARCA';
-                              const isTempoDriver = hasAutoDist && m.fatorDistribuicao === 'TEMPO';
+                              const maxScoredShots = m.quantidadeTirosPontuados ?? m.quantidadeTiros ?? null;
 
                               return (
                                 <div
@@ -1605,6 +1700,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                       <span className="text-[11px] text-slate-400 ml-2">
                                         {m.valorReferencia != null
                                           ? `Ref.: ${formatNumberBr(m.valorReferencia)} ${m.unidadeMedida || ''} • `
+                                          : ''}
+                                        {m.teveTiro && m.quantidadeTiros != null
+                                          ? `${m.quantidadeTiros} tiros geral${
+                                              m.quantidadeTirosPontuados != null
+                                                ? ` (${m.quantidadeTirosPontuados} pontuados)`
+                                                : ''
+                                            } • `
                                           : ''}
                                         Nota: {formatNumberBr(m.notaMinima)} a {formatNumberBr(m.notaMaxima)} (aprovação ≥{' '}
                                         {formatNumberBr(m.notaAprovacao)})
@@ -1638,12 +1740,24 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   {hasAutoDist && m.regrasDistribuicao && (
                                     <div className="text-[10px] text-sky-200/90 bg-sky-500/10 border border-sky-500/25 rounded-lg px-2.5 py-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                                       <span className="font-extrabold text-sky-300 uppercase">
-                                        Cálculo automático ({m.fatorDistribuicao === 'TEMPO' ? 'por Tempo' : `por ${m.unidadeMedida || m.tipoMarca}`}):
+                                        Cálculo automático (
+                                        {m.fatorDistribuicao === 'TEMPO'
+                                          ? 'por Tempo'
+                                          : m.fatorDistribuicao === 'ACERTOS'
+                                          ? 'por Acertos'
+                                          : m.fatorDistribuicao === 'TIROS_TEMPO'
+                                          ? 'Cruzado — Tiros/Acertos por segundo'
+                                          : `por ${m.unidadeMedida || m.tipoMarca}`}
+                                        ):
                                       </span>
                                       {m.regrasDistribuicao.map((r, rIdx) => (
                                         <span key={rIdx} className="text-slate-200">
                                           {m.fatorDistribuicao === 'TEMPO'
                                             ? `${tempoOp} ${formatSecondsCompact(r.valor)}`
+                                            : m.fatorDistribuicao === 'ACERTOS'
+                                            ? `${formatNumberBr(r.valor)} acertos`
+                                            : m.fatorDistribuicao === 'TIROS_TEMPO'
+                                            ? `${formatNumberBr(r.valor)} tiro(s) em ${formatNumberBr(r.tempoSegundos ?? 1)}s (${formatNumberBr(computeTierRate(r) ?? 0)}/s)`
                                             : `${formatNumberBr(r.valor)} ${m.unidadeMedida || ''}`}{' '}
                                           = <strong className="text-amber-300">{formatNumberBr(r.pontos)} pts</strong>
                                           {rIdx < (m.regrasDistribuicao?.length || 0) - 1 ? ' •' : ''}
@@ -1653,54 +1767,100 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   )}
 
                                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-                                    <div>
-                                      <label
-                                        className={`block text-[10px] font-bold uppercase mb-1 ${
-                                          isMarcaDriver ? 'text-sky-300' : 'text-slate-400'
-                                        }`}
-                                      >
-                                        {isMarcaDriver ? 'Índice Atingido' : 'Marca'} ({m.unidadeMedida || m.tipoMarca || 'valor'})
-                                        {isMarcaDriver && !isParticipantAbsent ? ' *' : ''}
-                                      </label>
-                                      <input
-                                        type="text"
-                                        inputMode="decimal"
-                                        disabled={isParticipantAbsent}
-                                        value={isParticipantAbsent ? '' : cell.valorMarca}
-                                        onChange={e => updateCell({ valorMarca: e.target.value })}
-                                        placeholder={
-                                          isParticipantAbsent
-                                            ? 'Ausente'
-                                            : m.valorReferencia != null
-                                            ? `Ex: ${m.valorReferencia}`
-                                            : m.tipoMarca === 'Distância'
-                                            ? 'Ex: 650'
-                                            : 'Ex: 35'
-                                        }
-                                        className={`w-full bg-slate-950 border disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 ${
-                                          isMarcaDriver ? 'border-sky-500/60 font-bold' : 'border-slate-700'
-                                        }`}
-                                      />
-                                    </div>
-
-                                    {m.usaTempo && (
+                                    {!isAcertosDriver && !isShotRateDriver && (
                                       <div>
                                         <label
                                           className={`block text-[10px] font-bold uppercase mb-1 ${
-                                            isTempoDriver ? 'text-sky-300' : 'text-slate-400'
+                                            isMarcaDriver ? 'text-sky-300' : 'text-slate-400'
                                           }`}
                                         >
-                                          Tempo (MM:SS){isTempoDriver && !isParticipantAbsent ? ' *' : ''}
+                                          {isMarcaDriver ? 'Índice Atingido' : 'Marca'} ({m.unidadeMedida || m.tipoMarca || 'valor'})
+                                          {isMarcaDriver && !isParticipantAbsent ? ' *' : ''}
                                         </label>
                                         <input
                                           type="text"
-                                          inputMode="numeric"
+                                          inputMode="decimal"
+                                          disabled={isParticipantAbsent}
+                                          value={isParticipantAbsent ? '' : cell.valorMarca}
+                                          onChange={e => updateCell({ valorMarca: e.target.value })}
+                                          placeholder={
+                                            isParticipantAbsent
+                                              ? 'Ausente'
+                                              : m.valorReferencia != null
+                                              ? `Ex: ${m.valorReferencia}`
+                                              : m.tipoMarca === 'Distância'
+                                              ? 'Ex: 650'
+                                              : 'Ex: 35'
+                                          }
+                                          className={`w-full bg-slate-950 border disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 ${
+                                            isMarcaDriver ? 'border-sky-500/60 font-bold' : 'border-slate-700'
+                                          }`}
+                                        />
+                                      </div>
+                                    )}
+
+                                    {m.teveTiro && (
+                                      <div>
+                                        <label
+                                          className={`block text-[10px] font-bold uppercase mb-1 ${
+                                            isAcertosDriver || isShotRateDriver ? 'text-sky-300' : 'text-rose-300'
+                                          }`}
+                                        >
+                                          Acertos{maxScoredShots != null ? ` (de ${maxScoredShots} pont.)` : ''}
+                                          {(isAcertosDriver || isShotRateDriver) && !isParticipantAbsent ? ' *' : ''}
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          max={maxScoredShots ?? undefined}
+                                          disabled={isParticipantAbsent}
+                                          value={isParticipantAbsent ? '' : cell.acertosTiros}
+                                          onChange={e => updateCell({ acertosTiros: e.target.value })}
+                                          placeholder={
+                                            isParticipantAbsent
+                                              ? 'Ausente'
+                                              : maxScoredShots != null
+                                              ? `0 a ${maxScoredShots}`
+                                              : 'Ex: 8'
+                                          }
+                                          className={`w-full bg-slate-950 border disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 ${
+                                            isAcertosDriver || isShotRateDriver ? 'border-sky-500/60 font-bold' : 'border-slate-700'
+                                          }`}
+                                        />
+                                      </div>
+                                    )}
+
+                                    {needsTimeInput && (
+                                      <div>
+                                        <label
+                                          className={`block text-[10px] font-bold uppercase mb-1 ${
+                                            isTempoDriver || isShotRateDriver ? 'text-sky-300' : 'text-slate-400'
+                                          }`}
+                                        >
+                                          {isShotRateDriver ? 'Tempo (segundos)' : 'Tempo (MM:SS)'}
+                                          {(isTempoDriver || isShotRateDriver) && !isParticipantAbsent ? ' *' : ''}
+                                        </label>
+                                        <input
+                                          type="text"
+                                          inputMode={isShotRateDriver ? 'decimal' : 'numeric'}
                                           disabled={isParticipantAbsent}
                                           value={isParticipantAbsent ? '' : cell.tempoInput}
-                                          onChange={e => updateCell({ tempoInput: maskTimeMMSS(e.target.value) })}
-                                          placeholder={isParticipantAbsent ? 'Ausente' : '00:00'}
+                                          onChange={e =>
+                                            updateCell({
+                                              tempoInput: isShotRateDriver
+                                                ? e.target.value
+                                                : maskTimeMMSS(e.target.value)
+                                            })
+                                          }
+                                          placeholder={
+                                            isParticipantAbsent
+                                              ? 'Ausente'
+                                              : isShotRateDriver
+                                              ? 'Ex: 1 ou 2,5'
+                                              : '00:00'
+                                          }
                                           className={`w-full bg-slate-950 border disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-amber-500 ${
-                                            isTempoDriver ? 'border-sky-500/60 font-bold' : 'border-slate-700'
+                                            isTempoDriver || isShotRateDriver ? 'border-sky-500/60 font-bold' : 'border-slate-700'
                                           }`}
                                         />
                                       </div>
@@ -1733,6 +1893,10 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                             : hasAutoDist
                                             ? isTempoDriver
                                               ? 'Informe o tempo'
+                                              : isAcertosDriver
+                                              ? 'Informe os acertos'
+                                              : isShotRateDriver
+                                              ? 'Informe acertos e tempo'
                                               : `Informe ${m.unidadeMedida || 'o índice'}`
                                             : `${formatNumberBr(m.notaMinima)} - ${formatNumberBr(m.notaMaxima)}`
                                         }
@@ -1747,7 +1911,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                           {distResult.matchedTier
                                             ? m.fatorDistribuicao === 'TEMPO'
                                               ? `Faixa ${tempoOp} ${formatSecondsCompact(distResult.matchedTier.valor)} → ${formatNumberBr(distResult.nota ?? 0)} pts`
+                                              : m.fatorDistribuicao === 'ACERTOS'
+                                              ? `Faixa ≥ ${formatNumberBr(distResult.matchedTier.valor)} acertos → ${formatNumberBr(distResult.nota ?? 0)} pts`
+                                              : m.fatorDistribuicao === 'TIROS_TEMPO'
+                                              ? `Taxa ${formatNumberBr(distResult.achievedRate ?? 0)}/s (faixa ${formatNumberBr(distResult.matchedTier.valor)} em ${formatNumberBr(distResult.matchedTier.tempoSegundos ?? 1)}s) → ${formatNumberBr(distResult.nota ?? 0)} pts`
                                               : `Faixa ≥ ${formatNumberBr(distResult.matchedTier.valor)} ${m.unidadeMedida || ''} → ${formatNumberBr(distResult.nota ?? 0)} pts`
+                                            : m.fatorDistribuicao === 'TIROS_TEMPO'
+                                            ? `Taxa ${formatNumberBr(distResult.achievedRate ?? 0)}/s — abaixo da 1ª faixa → Nota mín. (${formatNumberBr(m.notaMinima)})`
                                             : `Abaixo da 1ª faixa → Nota mín. (${formatNumberBr(m.notaMinima)})`}
                                         </div>
                                       )}
@@ -1756,7 +1926,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                     {m.teveTiro && (
                                       <div>
                                         <label className="block text-[10px] font-bold uppercase text-rose-300 mb-1">
-                                          Tiros ({m.tipoArma})
+                                          Tiros Geral ({m.tipoArma})
                                         </label>
                                         <input
                                           type="number"
@@ -1769,7 +1939,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                       </div>
                                     )}
 
-                                    <div className={m.usaTempo && m.teveTiro ? 'sm:col-span-2 lg:col-span-4' : ''}>
+                                    <div className={needsTimeInput && m.teveTiro ? 'sm:col-span-2 lg:col-span-3' : ''}>
                                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
                                         Observações
                                       </label>
@@ -1948,7 +2118,15 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                     {m.usaDistribuicaoNota && m.regrasDistribuicao && m.regrasDistribuicao.length > 0 && (
                       <div className="col-span-2 sm:col-span-3 pt-1.5 border-t border-slate-800">
                         <span className="text-sky-300 font-bold block mb-1">
-                          Distribuição de Pontos ({m.fatorDistribuicao === 'TEMPO' ? 'por Tempo' : `por ${m.tipoMarca || 'Marca'} — ${m.unidadeMedida || ''}`}):
+                          Distribuição de Pontos (
+                          {m.fatorDistribuicao === 'TEMPO'
+                            ? 'por Tempo'
+                            : m.fatorDistribuicao === 'ACERTOS'
+                            ? 'por Acertos'
+                            : m.fatorDistribuicao === 'TIROS_TEMPO'
+                            ? 'Cruzada — Tiros/Acertos por Segundo'
+                            : `por ${m.tipoMarca || 'Marca'} — ${m.unidadeMedida || ''}`}
+                          ):
                         </span>
                         <div className="flex flex-wrap gap-1.5">
                           {m.regrasDistribuicao.map((r, rIdx) => (
@@ -1958,6 +2136,10 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                             >
                               {m.fatorDistribuicao === 'TEMPO'
                                 ? `${normalizeTempoAprovacaoModo(m.tempoAprovacaoModo) === 'MAIOR_IGUAL' ? '≥' : '≤'} ${formatSecondsCompact(r.valor)}`
+                                : m.fatorDistribuicao === 'ACERTOS'
+                                ? `${formatNumberBr(r.valor)} acertos`
+                                : m.fatorDistribuicao === 'TIROS_TEMPO'
+                                ? `${formatNumberBr(r.valor)} tiro(s) em ${formatNumberBr(r.tempoSegundos ?? 1)}s (${formatNumberBr(computeTierRate(r) ?? 0)}/s)`
                                 : `${formatNumberBr(r.valor)} ${m.unidadeMedida || ''}`}{' '}
                               = <strong className="text-amber-300">{formatNumberBr(r.pontos)} pts</strong>
                             </span>
@@ -1969,7 +2151,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       <div className="col-span-2 sm:col-span-3 pt-1 border-t border-slate-800">
                         <span className="text-slate-500">Disparo de Arma de Fogo: </span>
                         <strong className={m.teveTiro ? 'text-rose-300' : 'text-slate-300'}>
-                          {m.teveTiro ? `Sim — ${m.tipoArma} (${m.quantidadeTiros} tiros)` : 'Não'}
+                          {m.teveTiro
+                            ? `Sim — ${m.tipoArma} (${m.quantidadeTiros} tiros geral${
+                                m.quantidadeTirosPontuados != null
+                                  ? ` • ${m.quantidadeTirosPontuados} pontuados`
+                                  : ''
+                              })`
+                            : 'Não'}
                         </strong>
                       </div>
                     )}
@@ -2248,8 +2436,98 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                 </div>
               )}
 
-              {/* DISTRIBUIR PONTUAÇÃO (Marcador Físico) */}
-              {mCategoria === 'FISICO' && (
+              {/* Disparo de Arma de Fogo (Marcador Tático) */}
+              {mCategoria === 'TATICO' && (
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold text-slate-200">Teve tiro de arma de fogo?</span>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMTeveTiro(false);
+                          if (mFatorDistribuicao === 'ACERTOS' || mFatorDistribuicao === 'TIROS_TEMPO') {
+                            if (mUsaTempo) {
+                              setMFatorDistribuicao('TEMPO');
+                            } else {
+                              setMUsaDistribuicao(false);
+                            }
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
+                          !mTeveTiro ? 'bg-slate-700 text-white' : 'bg-slate-900 text-slate-400'
+                        }`}
+                      >
+                        Não
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMTeveTiro(true);
+                          if (mFatorDistribuicao === 'MARCA') {
+                            setMFatorDistribuicao('ACERTOS');
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
+                          mTeveTiro ? 'bg-rose-500 text-white' : 'bg-slate-900 text-slate-400'
+                        }`}
+                      >
+                        Sim
+                      </button>
+                    </div>
+                  </div>
+
+                  {mTeveTiro && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      <div>
+                        <label className="block font-bold text-slate-300 mb-1">Tipo de Arma *</label>
+                        <select
+                          value={mTipoArma}
+                          onChange={e => setMTipoArma(e.target.value as TipoArmaDesempenho)}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                        >
+                          {TIPOS_ARMA.map(arma => (
+                            <option key={arma} value={arma}>
+                              {arma}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-300 mb-1">Quantidade de Tiros Geral *</label>
+                        <input
+                          type="number"
+                          min={1}
+                          required
+                          value={mQtdTiros}
+                          onChange={e => setMQtdTiros(e.target.value)}
+                          placeholder="Ex: 30"
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-amber-300 mb-1">Tiros Pontuados (Prova) *</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={Math.max(1, Number(mQtdTiros) || 9999)}
+                          required
+                          value={mQtdTirosPontuados}
+                          onChange={e => setMQtdTirosPontuados(e.target.value)}
+                          placeholder="Ex: 10"
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <p className="sm:col-span-3 text-[11px] text-slate-400">
+                        Ex.: <strong>30</strong> tiros no geral e <strong>10</strong> tiros destinados à prova / pontuação. Os tiros pontuados não podem ultrapassar o total geral.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* DISTRIBUIR PONTUAÇÃO (Marcador Físico ou Tático) */}
+              {(mCategoria === 'FISICO' || mTeveTiro || mUsaTempo) && (
                 <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-3">
                   <label className="flex items-center space-x-2.5 cursor-pointer">
                     <input
@@ -2258,8 +2536,17 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       onChange={e => {
                         const checked = e.target.checked;
                         setMUsaDistribuicao(checked);
-                        if (checked && mRegrasDistribuicao.length === 0) {
-                          setMRegrasDistribuicao([{ valor: '', pontos: '' }]);
+                        if (checked) {
+                          if (mCategoria === 'TATICO') {
+                            if (mTeveTiro && mFatorDistribuicao !== 'ACERTOS' && mFatorDistribuicao !== 'TIROS_TEMPO' && mFatorDistribuicao !== 'TEMPO') {
+                              setMFatorDistribuicao('TIROS_TEMPO');
+                            } else if (!mTeveTiro && mUsaTempo) {
+                              setMFatorDistribuicao('TEMPO');
+                            }
+                          }
+                          if (mRegrasDistribuicao.length === 0) {
+                            setMRegrasDistribuicao([{ valor: '', tempoSegundos: '1', pontos: '' }]);
+                          }
                         }
                       }}
                       className="rounded border-slate-600 text-sky-500 focus:ring-sky-500"
@@ -2269,7 +2556,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                         Distribuir pontuação por faixas / divisões (cálculo automático da nota)
                       </div>
                       <div className="text-[11px] text-slate-400">
-                        Defina quantos pontos vale cada fração de {mTipoMarca.toLowerCase()} ou tempo. Ao lançar o índice atingido, o sistema calcula a nota automaticamente.
+                        {mCategoria === 'FISICO'
+                          ? `Defina quantos pontos vale cada fração de ${mTipoMarca.toLowerCase()} ou tempo. Ao lançar o índice atingido, o sistema calcula a nota automaticamente.`
+                          : 'Defina faixas de acertos ou distribuição cruzada (tiros/acertos por segundo) para cálculo automático da pontuação.'}
                       </div>
                     </div>
                   </label>
@@ -2289,14 +2578,34 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                               if (nextFator === 'TEMPO' && !mUsaTempo) {
                                 setMUsaTempo(true);
                               }
-                              setMRegrasDistribuicao(prev => prev.map(r => ({ valor: '', pontos: r.pontos })));
+                              setMRegrasDistribuicao(prev =>
+                                prev.map(r => ({ valor: '', tempoSegundos: '1', pontos: r.pontos }))
+                              );
                             }}
                             className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-400"
                           >
-                            <option value="MARCA">
-                              {mTipoMarca} ({mUnidadeMedida.trim() || mTipoMarca})
-                            </option>
-                            <option value="TEMPO">Tempo (MM:SS)</option>
+                            {mCategoria === 'FISICO' ? (
+                              <>
+                                <option value="MARCA">
+                                  {mTipoMarca} ({mUnidadeMedida.trim() || mTipoMarca})
+                                </option>
+                                <option value="TEMPO">Tempo (MM:SS)</option>
+                              </>
+                            ) : (
+                              <>
+                                {mTeveTiro && (
+                                  <>
+                                    <option value="TIROS_TEMPO">
+                                      Distribuição Cruzada — Tiros / Acertos por Segundo (ex.: 2 tiros em 1s)
+                                    </option>
+                                    <option value="ACERTOS">
+                                      Acertos Simples — Quantidade de Acertos (ex.: 2 acertos = 3 pts)
+                                    </option>
+                                  </>
+                                )}
+                                <option value="TEMPO">Tempo (MM:SS)</option>
+                              </>
+                            )}
                           </select>
                         </div>
 
@@ -2318,13 +2627,21 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-slate-300">
-                            Tabela de Divisões ({mFatorDistribuicao === 'TEMPO' ? 'Tempo → Pontos' : `${mUnidadeMedida.trim() || mTipoMarca} → Pontos`})
+                            Tabela de Divisões (
+                            {mFatorDistribuicao === 'TEMPO'
+                              ? 'Tempo → Pontos'
+                              : mFatorDistribuicao === 'ACERTOS'
+                              ? 'Acertos → Pontos'
+                              : mFatorDistribuicao === 'TIROS_TEMPO'
+                              ? 'Tiros/Acertos em Tempo (s) → Pontos'
+                              : `${mUnidadeMedida.trim() || mTipoMarca} → Pontos`}
+                            )
                           </span>
                           <button
                             type="button"
                             onClick={() =>
                               setMRegrasDistribuicao(prev =>
-                                prev.length < 30 ? [...prev, { valor: '', pontos: '' }] : prev
+                                prev.length < 30 ? [...prev, { valor: '', tempoSegundos: '1', pontos: '' }] : prev
                               )
                             }
                             className="px-2.5 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 text-[11px] font-bold flex items-center space-x-1"
@@ -2335,77 +2652,133 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                         </div>
 
                         <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                          {mRegrasDistribuicao.map((tier, idx) => (
-                            <div
-                              key={idx}
-                              className="grid grid-cols-12 gap-2 items-center bg-slate-900/70 border border-slate-800 rounded-xl p-2"
-                            >
-                              <span className="col-span-1 text-[11px] font-extrabold text-slate-500 text-center">
-                                #{idx + 1}
-                              </span>
-                              <div className="col-span-5 flex items-center gap-1.5">
-                                <input
-                                  type="text"
-                                  inputMode={mFatorDistribuicao === 'TEMPO' ? 'numeric' : 'decimal'}
-                                  value={tier.valor}
-                                  onChange={e => {
-                                    const nextVal =
-                                      mFatorDistribuicao === 'TEMPO'
-                                        ? maskTimeMMSS(e.target.value)
-                                        : e.target.value;
-                                    setMRegrasDistribuicao(prev =>
-                                      prev.map((item, i) => (i === idx ? { ...item, valor: nextVal } : item))
-                                    );
-                                  }}
-                                  placeholder={
-                                    mFatorDistribuicao === 'TEMPO'
-                                      ? '03:00'
-                                      : mTipoMarca === 'Distância'
-                                      ? 'Ex: 200'
-                                      : 'Ex: 3'
-                                  }
-                                  className={`w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-sky-400 ${
-                                    mFatorDistribuicao === 'TEMPO' ? 'font-mono' : ''
-                                  }`}
-                                />
-                                <span className="text-[10px] text-slate-400 shrink-0">
-                                  {mFatorDistribuicao === 'TEMPO' ? 'mm:ss' : mUnidadeMedida.trim() || 'un.'}
+                          {mRegrasDistribuicao.map((tier, idx) => {
+                            const previewShots = Number(String(tier.valor || '').replace(',', '.'));
+                            const previewSecs = Number(String(tier.tempoSegundos || '').replace(',', '.'));
+                            const previewRate =
+                              mFatorDistribuicao === 'TIROS_TEMPO' &&
+                              Number.isFinite(previewShots) &&
+                              previewShots > 0 &&
+                              Number.isFinite(previewSecs) &&
+                              previewSecs > 0
+                                ? Math.round((previewShots / previewSecs) * 100) / 100
+                                : null;
+
+                            return (
+                              <div
+                                key={idx}
+                                className="grid grid-cols-12 gap-2 items-center bg-slate-900/70 border border-slate-800 rounded-xl p-2"
+                              >
+                                <span className="col-span-1 text-[11px] font-extrabold text-slate-500 text-center">
+                                  #{idx + 1}
                                 </span>
+
+                                {mFatorDistribuicao === 'TIROS_TEMPO' ? (
+                                  <div className="col-span-6 flex flex-wrap sm:flex-nowrap items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={tier.valor}
+                                      onChange={e => {
+                                        const nextVal = e.target.value;
+                                        setMRegrasDistribuicao(prev =>
+                                          prev.map((item, i) => (i === idx ? { ...item, valor: nextVal } : item))
+                                        );
+                                      }}
+                                      placeholder="Ex: 2"
+                                      className="w-16 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-sky-400"
+                                    />
+                                    <span className="text-[10px] text-slate-400 shrink-0">tiros em</span>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={tier.tempoSegundos}
+                                      onChange={e => {
+                                        const nextSec = e.target.value;
+                                        setMRegrasDistribuicao(prev =>
+                                          prev.map((item, i) => (i === idx ? { ...item, tempoSegundos: nextSec } : item))
+                                        );
+                                      }}
+                                      placeholder="1"
+                                      className="w-16 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 font-mono text-white focus:outline-none focus:border-sky-400"
+                                    />
+                                    <span className="text-[10px] text-slate-400 shrink-0">
+                                      s{previewRate !== null ? ` (${formatNumberBr(previewRate)}/s)` : ''}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="col-span-5 flex items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      inputMode={mFatorDistribuicao === 'TEMPO' ? 'numeric' : 'decimal'}
+                                      value={tier.valor}
+                                      onChange={e => {
+                                        const nextVal =
+                                          mFatorDistribuicao === 'TEMPO'
+                                            ? maskTimeMMSS(e.target.value)
+                                            : e.target.value;
+                                        setMRegrasDistribuicao(prev =>
+                                          prev.map((item, i) => (i === idx ? { ...item, valor: nextVal } : item))
+                                        );
+                                      }}
+                                      placeholder={
+                                        mFatorDistribuicao === 'TEMPO'
+                                          ? '03:00'
+                                          : mFatorDistribuicao === 'ACERTOS'
+                                          ? 'Ex: 2'
+                                          : mTipoMarca === 'Distância'
+                                          ? 'Ex: 200'
+                                          : 'Ex: 3'
+                                      }
+                                      className={`w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-sky-400 ${
+                                        mFatorDistribuicao === 'TEMPO' ? 'font-mono' : ''
+                                      }`}
+                                    />
+                                    <span className="text-[10px] text-slate-400 shrink-0">
+                                      {mFatorDistribuicao === 'TEMPO'
+                                        ? 'mm:ss'
+                                        : mFatorDistribuicao === 'ACERTOS'
+                                        ? 'acertos'
+                                        : mUnidadeMedida.trim() || 'un.'}
+                                    </span>
+                                  </div>
+                                )}
+
+                                <span className="col-span-1 text-[10px] font-bold text-slate-400 text-center">
+                                  vale
+                                </span>
+                                <div className={`${mFatorDistribuicao === 'TIROS_TEMPO' ? 'col-span-3' : 'col-span-4'} flex items-center gap-1.5`}>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={tier.pontos}
+                                    onChange={e => {
+                                      const nextPts = e.target.value;
+                                      setMRegrasDistribuicao(prev =>
+                                        prev.map((item, i) => (i === idx ? { ...item, pontos: nextPts } : item))
+                                      );
+                                    }}
+                                    placeholder="Ex: 2"
+                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-amber-300 font-bold focus:outline-none focus:border-amber-500"
+                                  />
+                                  <span className="text-[10px] text-slate-400 shrink-0">pts</span>
+                                </div>
+                                <div className="col-span-1 flex justify-end">
+                                  <button
+                                    type="button"
+                                    disabled={mRegrasDistribuicao.length <= 1}
+                                    onClick={() =>
+                                      setMRegrasDistribuicao(prev => prev.filter((_, i) => i !== idx))
+                                    }
+                                    className="p-1 rounded-lg text-slate-500 hover:text-rose-400 disabled:opacity-30"
+                                    title="Remover divisão"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </div>
-                              <span className="col-span-1 text-[10px] font-bold text-slate-400 text-center">
-                                vale
-                              </span>
-                              <div className="col-span-4 flex items-center gap-1.5">
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  value={tier.pontos}
-                                  onChange={e => {
-                                    const nextPts = e.target.value;
-                                    setMRegrasDistribuicao(prev =>
-                                      prev.map((item, i) => (i === idx ? { ...item, pontos: nextPts } : item))
-                                    );
-                                  }}
-                                  placeholder="Ex: 2"
-                                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-amber-300 font-bold focus:outline-none focus:border-amber-500"
-                                />
-                                <span className="text-[10px] text-slate-400 shrink-0">pts</span>
-                              </div>
-                              <div className="col-span-1 flex justify-end">
-                                <button
-                                  type="button"
-                                  disabled={mRegrasDistribuicao.length <= 1}
-                                  onClick={() =>
-                                    setMRegrasDistribuicao(prev => prev.filter((_, i) => i !== idx))
-                                  }
-                                  className="p-1 rounded-lg text-slate-500 hover:text-rose-400 disabled:opacity-30"
-                                  title="Remover divisão"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
 
                         <p className="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-800 rounded-lg px-2.5 py-2">
@@ -2413,67 +2786,12 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                             ? mTempoAprovModo === 'MENOR_IGUAL'
                               ? 'Regra (tempo invertido): quanto menor o tempo, melhor a nota. Ex.: se 03:00 = 6 pts e 02:30 = 8 pts, 02:45 vale 6 pts e 02:30 ou menos vale 8 pts.'
                               : 'Regra (tempo normal): quanto maior o tempo, melhor a nota. Ex.: se 01:00 = 5 pts e 02:00 = 8 pts, 01:59 vale 5 pts e 02:00 ou mais vale 8 pts.'
+                            : mFatorDistribuicao === 'ACERTOS'
+                            ? 'Regra (acertos): ex. 2 acertos = 3 pts, 3 acertos = 5 pts. O sistema aplica o degrau exato ou imediatamente anterior aos acertos registrados.'
+                            : mFatorDistribuicao === 'TIROS_TEMPO'
+                            ? 'Regra cruzada (taxa de acerto por segundo): ex. 2 tiros em 1s (2/s) = 2 pts e 3 tiros em 1s (3/s) = 4 pts. Ao lançar os acertos e o tempo em segundos, o sistema calcula acertos ÷ tempo e aplica a maior faixa atingida.'
                             : `Regra de degrau: o sistema usa o valor exato ou o último degrau atingido antes do próximo valor (ex.: se 100 ${mUnidadeMedida.trim() || 'un.'} = 3 pts e 200 = 4 pts, 199 continua valendo 3 pts e 201 vale 4 pts). Abaixo da 1ª faixa vale a nota mínima.`}
                         </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Disparo de Arma de Fogo (Marcador Tático) */}
-              {mCategoria === 'TATICO' && (
-                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-bold text-slate-200">Teve tiro de arma de fogo?</span>
-                    <div className="flex items-center space-x-2">
-                      <button
-                        type="button"
-                        onClick={() => setMTeveTiro(false)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
-                          !mTeveTiro ? 'bg-slate-700 text-white' : 'bg-slate-900 text-slate-400'
-                        }`}
-                      >
-                        Não
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setMTeveTiro(true)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
-                          mTeveTiro ? 'bg-rose-500 text-white' : 'bg-slate-900 text-slate-400'
-                        }`}
-                      >
-                        Sim
-                      </button>
-                    </div>
-                  </div>
-
-                  {mTeveTiro && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                      <div>
-                        <label className="block font-bold text-slate-300 mb-1">Tipo de Arma *</label>
-                        <select
-                          value={mTipoArma}
-                          onChange={e => setMTipoArma(e.target.value as TipoArmaDesempenho)}
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
-                        >
-                          {TIPOS_ARMA.map(arma => (
-                            <option key={arma} value={arma}>
-                              {arma}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block font-bold text-slate-300 mb-1">Quantidade de Tiros *</label>
-                        <input
-                          type="number"
-                          min={1}
-                          required
-                          value={mQtdTiros}
-                          onChange={e => setMQtdTiros(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
-                        />
                       </div>
                     </div>
                   )}

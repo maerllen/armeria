@@ -310,13 +310,17 @@ export function printRelatorioOperacaoCat(
   units: Unit[],
   departments: Department[],
   fallbackUnitName?: string,
-  fallbackDeptName?: string
+  fallbackDeptName?: string,
+  issuerUser?: User | null
 ) {
   const unitObj = units.find(u => u.id === rel.unitId);
   const deptObj = departments.find(d => d.id === (rel.departmentId || unitObj?.departmentId));
-  const logoUrl = getSystemLogo(unitObj, deptObj);
-  const unitLabel = rel.unitName || unitObj?.name || fallbackUnitName || 'CAT — Coordenação Aerotática';
-  const deptLabel = deptObj?.name || fallbackDeptName || 'Polícia Civil de Minas Gerais';
+  const issuerUnitObj = (issuerUser?.unitId && units.find(u => u.id === issuerUser.unitId)) || unitObj;
+  const issuerDeptObj =
+    departments.find(d => d.id === (issuerUnitObj?.departmentId || issuerUser?.departmentId)) || deptObj;
+  const logoUrl = getSystemLogo(issuerUnitObj, issuerDeptObj);
+  const unitLabel = issuerUnitObj?.name || rel.unitName || unitObj?.name || fallbackUnitName || 'CAT — Coordenação Aerotática';
+  const deptLabel = issuerDeptObj?.name || deptObj?.name || fallbackDeptName || 'Polícia Civil de Minas Gerais';
 
   const municipiosTodos = [
     `${rel.municipioOperacao}/${rel.estadoOperacao}`,
@@ -2198,7 +2202,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       if (onSaved) onSaved();
 
       if (shouldPrint && savedReport) {
-        printRelatorioOperacaoCat(savedReport, units, departments, activeUnitName, activeDeptName);
+        printRelatorioOperacaoCat(savedReport, units, departments, activeUnitName, activeDeptName, currentUser);
       }
     } finally {
       setIsSubmitting(false);
@@ -2312,7 +2316,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
                     <button
                       type="button"
                       onClick={() =>
-                        printRelatorioOperacaoCat(r, units, departments, activeUnitName, activeDeptName)
+                        printRelatorioOperacaoCat(r, units, departments, activeUnitName, activeDeptName, currentUser)
                       }
                       className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center space-x-1"
                     >

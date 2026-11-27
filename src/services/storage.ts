@@ -5803,6 +5803,7 @@ class StorageService {
       ausente?: boolean;
       ausenciaInformada?: boolean | null;
       tirosEfetuados?: number | null;
+      acertosTiros?: number | null;
       observacoes?: string | null;
     }>
   ): Promise<{ success: boolean; savedCount?: number; error?: string }> {

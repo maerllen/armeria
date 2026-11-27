@@ -127,6 +127,9 @@ function resolveCocUnitAndLogo(
   dog: Cachorro,
   currentUser: User
 ): { unitObj: Unit | null; deptObj: Department | null; logoUrl: string } {
+  // Layout do relatório/ficha segue a unidade cadastrada do usuário emissor
+  const issuerUnit = currentUser?.unitId ? units.find(u => u.id === currentUser.unitId) || null : null;
+
   const cocMatches = units.filter(
     u =>
       /\bcoc\b/i.test(u.name || '') ||
@@ -134,21 +137,23 @@ function resolveCocUnitAndLogo(
   );
   const canilMatches = units.filter(u => /canil|\bk9\b/i.test(u.name || ''));
 
-  const cocUnit =
+  const layoutUnit =
+    issuerUnit ||
     cocMatches.find(u => Boolean(u.logoUrl && u.logoUrl.trim())) ||
     cocMatches[0] ||
     canilMatches.find(u => Boolean(u.logoUrl && u.logoUrl.trim())) ||
     canilMatches[0] ||
     units.find(u => u.id === dog.unitId) ||
-    units.find(u => u.id === currentUser.unitId) ||
     null;
 
   const deptObj =
-    departments.find(d => d.id === (cocUnit?.departmentId || dog.departmentId || currentUser.departmentId)) || null;
+    departments.find(
+      d => d.id === (layoutUnit?.departmentId || currentUser?.departmentId || dog.departmentId)
+    ) || null;
 
-  const rawLogo = getSystemLogo(cocUnit, deptObj);
+  const rawLogo = getSystemLogo(layoutUnit, deptObj);
   const safeLogo = getSafeImageUrl(rawLogo) || '';
-  return { unitObj: cocUnit, deptObj, logoUrl: safeLogo };
+  return { unitObj: layoutUnit, deptObj, logoUrl: safeLogo };
 }
 
 function getTodayIsoBr(): string {

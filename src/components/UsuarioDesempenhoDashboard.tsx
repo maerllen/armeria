@@ -45,17 +45,27 @@ interface UsuarioDesempenhoDashboardProps {
 
 export function formatSecondsToHuman(seconds?: number | null): string {
   if (seconds === undefined || seconds === null || !Number.isFinite(seconds)) return '—';
-  const s = Math.max(0, Math.round(seconds));
+  const clamped = Math.max(0, Math.round(seconds * 100) / 100);
+  if (!Number.isInteger(clamped) && clamped < 60) {
+    return `${formatNumberBr(clamped)}s`;
+  }
+  const s = Math.floor(clamped);
+  const frac = Math.round((clamped - s) * 100) / 100;
   const mins = Math.floor(s / 60);
   const rem = s % 60;
-  if (mins === 0) return `${rem}s`;
-  if (rem === 0) return mins === 1 ? '1 minuto' : `${mins} minutos`;
+  if (mins === 0) return `${formatNumberBr(rem + frac)}s`;
+  if (rem === 0 && frac === 0) return mins === 1 ? '1 minuto' : `${mins} minutos`;
+  if (frac > 0) return `${mins}m ${formatNumberBr(rem + frac)}s`;
   return `${mins}m ${String(rem).padStart(2, '0')}s`;
 }
 
 export function formatSecondsCompact(seconds?: number | null): string {
   if (seconds === undefined || seconds === null || !Number.isFinite(seconds)) return '—';
-  const s = Math.max(0, Math.round(seconds));
+  const clamped = Math.max(0, Math.round(seconds * 100) / 100);
+  if (!Number.isInteger(clamped) && clamped < 60) {
+    return `${formatNumberBr(clamped)}s`;
+  }
+  const s = Math.max(0, Math.round(clamped));
   const mins = Math.floor(s / 60);
   const rem = s % 60;
   return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
@@ -85,8 +95,15 @@ export function formatResultadoResumo(r: DesempenhoResultado): string {
     const unitLabel = r.unidadeMedida || (r.tipoMarca === 'Distância' ? 'm' : r.tipoMarca === 'Repetição' ? 'rep.' : 'exec.');
     parts.push(`${formatNumberBr(r.valorMarca)} ${unitLabel}`);
   }
+  if (r.acertosTiros !== undefined && r.acertosTiros !== null) {
+    const scoredRef = r.quantidadeTirosPontuadosRef ? `/${r.quantidadeTirosPontuadosRef}` : '';
+    parts.push(`${formatNumberBr(r.acertosTiros)}${scoredRef} acertos`);
+  }
   if (r.tempoSegundos !== undefined && r.tempoSegundos !== null) {
     parts.push(`em ${formatSecondsToHuman(r.tempoSegundos)}`);
+  }
+  if (r.taxaAcertoPorSegundo !== undefined && r.taxaAcertoPorSegundo !== null) {
+    parts.push(`(${formatNumberBr(r.taxaAcertoPorSegundo)}/s)`);
   }
   const left = parts.join(' ');
   const pts = `${formatNumberBr(r.notaObtida)} pts`;
@@ -315,7 +332,10 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
   }, [evolutionSeries]);
 
   const handlePrintDashboard = () => {
-    const logoUrl = getSystemLogo(userUnit, userDept);
+    const issuerUnit = units.find(u => u.id === currentUser.unitId) || userUnit;
+    const issuerDept =
+      departments.find(d => d.id === (issuerUnit?.departmentId || currentUser.departmentId)) || userDept;
+    const logoUrl = getSystemLogo(issuerUnit, issuerDept);
     const docTitle = buildStandardDocumentTitle('FICHA DE ÍNDICES DE DESEMPENHO INDIVIDUAL');
 
     const barsHtml = markerSummaries
@@ -376,12 +396,12 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
             <div>
               <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#475569;">Polícia Civil de Minas Gerais</div>
               <div style="font-size:16px;font-weight:800;color:#0f172a;">FICHA DE ÍNDICES DE DESEMPENHO INDIVIDUAL</div>
-              <div style="font-size:11px;color:#475569;">${escapeHtmlText(userUnit?.name || 'Unidade')} ${userDept ? `• ${escapeHtmlText(userDept.name)}` : ''}</div>
+              <div style="font-size:11px;color:#475569;">${escapeHtmlText(issuerUnit?.name || 'Unidade')} ${issuerDept ? `• ${escapeHtmlText(issuerDept.name)}` : ''}</div>
             </div>
           </div>
           <div style="text-align:right;font-size:11px;color:#475569;">
             <div><strong>Emitido em:</strong> ${escapeHtmlText(new Date().toLocaleString('pt-BR'))}</div>
-            <div><strong>Emissor:</strong> ${escapeHtmlText(currentUser.name)}</div>
+            <div><strong>Emissor:</strong> ${escapeHtmlText(currentUser.name)}${issuerUnit?.name ? ` (${escapeHtmlText(issuerUnit.name)})` : ''}</div>
           </div>
         </div>
 
@@ -389,10 +409,11 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
           <div style="width:72px;height:96px;border-radius:6px;overflow:hidden;border:1.5px solid #cbd5e1;background:#e2e8f0;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#64748b;font-weight:700;font-size:10px;text-align:center;">
             ${safePrintPhoto ? `<img src="${escapeHtmlText(safePrintPhoto)}" alt="Foto 3x4" style="width:100%;height:100%;object-fit:cover;" />` : 'FOTO<br/>3x4'}
           </div>
-          <div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+          <div style="flex:1;display:grid;grid-template-columns:repeat(5,1fr);gap:10px;">
             <div><div style="color:#64748b;font-weight:600;">POLICIAL</div><div style="font-weight:800;font-size:13px;">${escapeHtmlText(targetUser.name)}</div></div>
             <div><div style="color:#64748b;font-weight:600;">MASP</div><div style="font-weight:700;">${escapeHtmlText(formatMasp(targetUser.masp || ''))}</div></div>
             <div><div style="color:#64748b;font-weight:600;">CARGO</div><div style="font-weight:700;">${escapeHtmlText(targetUser.cargo || '—')}</div></div>
+            <div><div style="color:#64748b;font-weight:600;">UNIDADE DO AVALIADO</div><div style="font-weight:700;">${escapeHtmlText(userUnit?.name || '—')}</div></div>
             <div><div style="color:#64748b;font-weight:600;">APROVEITAMENTO / APROVAÇÃO</div><div style="font-weight:800;color:#059669;">${kpis.mediaPct}% • ${kpis.taxaAprovacao}% aprov.</div></div>
           </div>
         </div>

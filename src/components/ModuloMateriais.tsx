@@ -441,7 +441,13 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       ? allDepartmentsList.find(d => d.id === vaultObj.departmentId) || departments.find(d => d.id === vaultObj.departmentId)
       : allDepartmentsList.find(d => d.id === currentUser?.departmentId) || departments.find(d => d.id === currentUser?.departmentId);
 
-    const logoSrc = getSystemLogo(vaultUnit, vaultDept);
+    const issuerUnit =
+      allUnitsList.find(u => u.id === currentUser?.unitId) || units.find(u => u.id === currentUser?.unitId) || vaultUnit;
+    const issuerDept =
+      allDepartmentsList.find(d => d.id === (issuerUnit?.departmentId || currentUser?.departmentId)) ||
+      departments.find(d => d.id === (issuerUnit?.departmentId || currentUser?.departmentId)) ||
+      vaultDept;
+    const logoSrc = getSystemLogo(issuerUnit, issuerDept);
     const vaultCode = isLegacy ? 'OUTROS LOCAIS (Legado)' : (vaultObj?.code || 'N/I');
     const vaultDesc = isLegacy
       ? 'Materiais sem cofre vinculado'
@@ -619,7 +625,13 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       ? allDepartmentsList.find(d => d.id === selectedDeptFilter) || departments.find(d => d.id === selectedDeptFilter)
       : allDepartmentsList.find(d => d.id === currentUser?.departmentId) || departments.find(d => d.id === currentUser?.departmentId);
 
-    const logoSrc = getSystemLogo(filterUnitObj, filterDeptObj);
+    const issuerUnit =
+      allUnitsList.find(u => u.id === currentUser?.unitId) || units.find(u => u.id === currentUser?.unitId) || filterUnitObj;
+    const issuerDept =
+      allDepartmentsList.find(d => d.id === (issuerUnit?.departmentId || currentUser?.departmentId)) ||
+      departments.find(d => d.id === (issuerUnit?.departmentId || currentUser?.departmentId)) ||
+      filterDeptObj;
+    const logoSrc = getSystemLogo(issuerUnit, issuerDept);
 
     const activeFiltersDesc: string[] = [];
     if (searchTerm.trim()) activeFiltersDesc.push(`Busca: "${searchTerm.trim()}"`);

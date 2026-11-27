@@ -2,7 +2,10 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import {
   calculateDistributedScore,
+  computeTierRate,
+  DesempenhoDistribuicaoFaixa,
   evaluateDesempenhoApproval,
+  FatorDistribuicaoNota,
   normalizeFatorDistribuicao,
   normalizeTempoAprovacaoModo,
   parseRegrasDistribuicao
@@ -57,17 +60,18 @@ async function ensureDesempenhoSchema(pool: any): Promise<void> {
       \`TEMPO_MIN_SEG\` INT DEFAULT NULL,
       \`TEMPO_MAX_SEG\` INT DEFAULT NULL,
       \`TEMPO_APROVACAO_SEG\` INT DEFAULT NULL,
-      \`TEMPO_APROVACAO_MODO\` VARCHAR(16) NOT NULL DEFAULT 'MENOR_IGUAL',
+      \`TEMPO_APROVACAO_MODO\` VARCHAR(20) NOT NULL DEFAULT 'MENOR_IGUAL',
       \`NOTA_MIN\` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
       \`NOTA_MAX\` DECIMAL(10,2) NOT NULL DEFAULT 10.00,
       \`NOTA_APROVACAO\` DECIMAL(10,2) NOT NULL DEFAULT 6.00,
       \`USA_DISTRIBUICAO_NOTA\` TINYINT(1) NOT NULL DEFAULT 0,
-      \`FATOR_DISTRIBUICAO\` VARCHAR(20) DEFAULT NULL,
+      \`FATOR_DISTRIBUICAO\` VARCHAR(30) DEFAULT NULL,
       \`REGRAS_DISTRIBUICAO\` LONGTEXT DEFAULT NULL,
       \`DIFICULDADE\` VARCHAR(40) NOT NULL DEFAULT 'Médio',
       \`TEVE_TIRO\` TINYINT(1) NOT NULL DEFAULT 0,
       \`TIPO_ARMA\` VARCHAR(40) DEFAULT NULL,
       \`QUANTIDADE_TIROS\` INT DEFAULT NULL,
+      \`QUANTIDADE_TIROS_PONTUADOS\` INT DEFAULT NULL,
       \`DESCRICAO\` LONGTEXT DEFAULT NULL,
       \`DEPARTAMENTO_ID\` VARCHAR(64) DEFAULT NULL,
       \`UNIDADE_ID\` VARCHAR(64) DEFAULT NULL,
@@ -179,19 +183,22 @@ async function ensureDesempenhoSchema(pool: any): Promise<void> {
       \`DATA_AVALIACAO\` VARCHAR(10) NOT NULL,
       \`HORA_AVALIACAO\` VARCHAR(5) DEFAULT NULL,
       \`VALOR_MARCA\` DECIMAL(12,2) DEFAULT NULL,
-      \`TEMPO_SEGUNDOS\` INT DEFAULT NULL,
+      \`TEMPO_SEGUNDOS\` DECIMAL(10,2) DEFAULT NULL,
       \`NOTA_OBTIDA\` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
       \`NOTA_MIN_REF\` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
       \`NOTA_MAX_REF\` DECIMAL(10,2) NOT NULL DEFAULT 10.00,
       \`NOTA_APROVACAO_REF\` DECIMAL(10,2) NOT NULL DEFAULT 6.00,
       \`TEMPO_APROVACAO_REF\` INT DEFAULT NULL,
-      \`TEMPO_APROVACAO_MODO_REF\` VARCHAR(16) DEFAULT NULL,
+      \`TEMPO_APROVACAO_MODO_REF\` VARCHAR(20) DEFAULT NULL,
       \`APROVADO\` TINYINT(1) NOT NULL DEFAULT 0,
       \`AUSENTE\` TINYINT(1) NOT NULL DEFAULT 0,
       \`AUSENCIA_INFORMADA\` TINYINT(1) DEFAULT NULL,
       \`TEVE_TIRO\` TINYINT(1) NOT NULL DEFAULT 0,
       \`TIPO_ARMA\` VARCHAR(40) DEFAULT NULL,
       \`TIROS_EFETUADOS\` INT DEFAULT NULL,
+      \`QUANTIDADE_TIROS_PONTUADOS_REF\` INT DEFAULT NULL,
+      \`ACERTOS_TIROS\` INT DEFAULT NULL,
+      \`TAXA_ACERTO_POR_SEGUNDO\` DECIMAL(10,4) DEFAULT NULL,
       \`OBSERVACOES\` VARCHAR(500) DEFAULT NULL,
       \`LANCADO_POR_ID\` VARCHAR(64) DEFAULT NULL,
       \`LANCADO_POR_NOME\` VARCHAR(255) DEFAULT NULL,
@@ -250,7 +257,7 @@ async function ensureDesempenhoSchema(pool: any): Promise<void> {
     await ensureColumn(
       'DESEMPENHO_MARCADORES',
       'FATOR_DISTRIBUICAO',
-      'ALTER TABLE `DESEMPENHO_MARCADORES` ADD COLUMN `FATOR_DISTRIBUICAO` VARCHAR(20) DEFAULT NULL AFTER `USA_DISTRIBUICAO_NOTA`'
+      'ALTER TABLE `DESEMPENHO_MARCADORES` ADD COLUMN `FATOR_DISTRIBUICAO` VARCHAR(30) DEFAULT NULL AFTER `USA_DISTRIBUICAO_NOTA`'
     );
     await ensureColumn(
       'DESEMPENHO_MARCADORES',
@@ -258,10 +265,34 @@ async function ensureDesempenhoSchema(pool: any): Promise<void> {
       'ALTER TABLE `DESEMPENHO_MARCADORES` ADD COLUMN `REGRAS_DISTRIBUICAO` LONGTEXT DEFAULT NULL AFTER `FATOR_DISTRIBUICAO`'
     );
     await ensureColumn(
+      'DESEMPENHO_MARCADORES',
+      'QUANTIDADE_TIROS_PONTUADOS',
+      'ALTER TABLE `DESEMPENHO_MARCADORES` ADD COLUMN `QUANTIDADE_TIROS_PONTUADOS` INT DEFAULT NULL AFTER `QUANTIDADE_TIROS`'
+    );
+    await ensureColumn(
       'DESEMPENHO_RESULTADOS',
       'TEMPO_APROVACAO_MODO_REF',
-      'ALTER TABLE `DESEMPENHO_RESULTADOS` ADD COLUMN `TEMPO_APROVACAO_MODO_REF` VARCHAR(16) DEFAULT NULL AFTER `TEMPO_APROVACAO_REF`'
+      'ALTER TABLE `DESEMPENHO_RESULTADOS` ADD COLUMN `TEMPO_APROVACAO_MODO_REF` VARCHAR(20) DEFAULT NULL AFTER `TEMPO_APROVACAO_REF`'
     );
+    await ensureColumn(
+      'DESEMPENHO_RESULTADOS',
+      'QUANTIDADE_TIROS_PONTUADOS_REF',
+      'ALTER TABLE `DESEMPENHO_RESULTADOS` ADD COLUMN `QUANTIDADE_TIROS_PONTUADOS_REF` INT DEFAULT NULL AFTER `TIROS_EFETUADOS`'
+    );
+    await ensureColumn(
+      'DESEMPENHO_RESULTADOS',
+      'ACERTOS_TIROS',
+      'ALTER TABLE `DESEMPENHO_RESULTADOS` ADD COLUMN `ACERTOS_TIROS` INT DEFAULT NULL AFTER `QUANTIDADE_TIROS_PONTUADOS_REF`'
+    );
+    await ensureColumn(
+      'DESEMPENHO_RESULTADOS',
+      'TAXA_ACERTO_POR_SEGUNDO',
+      'ALTER TABLE `DESEMPENHO_RESULTADOS` ADD COLUMN `TAXA_ACERTO_POR_SEGUNDO` DECIMAL(10,4) DEFAULT NULL AFTER `ACERTOS_TIROS`'
+    );
+    try {
+      await pool.query('ALTER TABLE `DESEMPENHO_MARCADORES` MODIFY COLUMN `FATOR_DISTRIBUICAO` VARCHAR(30) DEFAULT NULL');
+      await pool.query('ALTER TABLE `DESEMPENHO_RESULTADOS` MODIFY COLUMN `TEMPO_SEGUNDOS` DECIMAL(10,2) DEFAULT NULL');
+    } catch {}
   } catch (migErr) {
     console.warn('[Aviso ensureDesempenhoSchema]', migErr);
   }
@@ -393,6 +424,7 @@ function mapMarcadorRow(row: any) {
     teveTiro: Boolean(Number(row.TEVE_TIRO ?? 0)),
     tipoArma: row.TIPO_ARMA ? String(row.TIPO_ARMA) : null,
     quantidadeTiros: row.QUANTIDADE_TIROS != null ? Number(row.QUANTIDADE_TIROS) : null,
+    quantidadeTirosPontuados: row.QUANTIDADE_TIROS_PONTUADOS != null ? Number(row.QUANTIDADE_TIROS_PONTUADOS) : null,
     descricao: row.DESCRICAO != null ? String(row.DESCRICAO) : null,
     departmentId: row.DEPARTAMENTO_ID ? String(row.DEPARTAMENTO_ID) : null,
     unitId: row.UNIDADE_ID ? String(row.UNIDADE_ID) : null,
@@ -440,6 +472,9 @@ function mapResultadoRow(row: any) {
     teveTiro: Boolean(Number(row.TEVE_TIRO ?? 0)),
     tipoArma: row.TIPO_ARMA ? String(row.TIPO_ARMA) : null,
     tirosEfetuados: row.TIROS_EFETUADOS != null ? Number(row.TIROS_EFETUADOS) : null,
+    quantidadeTirosPontuadosRef: row.QUANTIDADE_TIROS_PONTUADOS_REF != null ? Number(row.QUANTIDADE_TIROS_PONTUADOS_REF) : null,
+    acertosTiros: row.ACERTOS_TIROS != null ? Number(row.ACERTOS_TIROS) : null,
+    taxaAcertoPorSegundo: row.TAXA_ACERTO_POR_SEGUNDO != null ? Number(row.TAXA_ACERTO_POR_SEGUNDO) : null,
     observacoes: row.OBSERVACOES != null ? String(row.OBSERVACOES) : null,
     lancadoPorId: row.LANCADO_POR_ID ? String(row.LANCADO_POR_ID) : undefined,
     lancadoPorNome: row.LANCADO_POR_NOME ? String(row.LANCADO_POR_NOME) : undefined,
@@ -538,60 +573,10 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
     tempoAprovacaoSegundos = null;
   }
 
-  const usaDistribuicaoNota = Boolean(body?.usaDistribuicaoNota);
-  let fatorDistribuicao: 'MARCA' | 'TEMPO' | null = null;
-  let regrasDistribuicao: Array<{ valor: number; pontos: number }> = [];
-
-  if (usaDistribuicaoNota) {
-    fatorDistribuicao = normalizeFatorDistribuicao(body?.fatorDistribuicao);
-    if (!fatorDistribuicao) {
-      return {
-        ok: false,
-        error: 'Selecione o fator de distribuição de pontuação (Tipo de Marca ou Tempo).'
-      };
-    }
-    if (fatorDistribuicao === 'TEMPO' && !usaTempo) {
-      return {
-        ok: false,
-        error: 'Ative o controle de tempo para utilizar distribuição de pontuação por tempo.'
-      };
-    }
-    const rawRules = Array.isArray(body?.regrasDistribuicao) ? body.regrasDistribuicao : [];
-    if (rawRules.length === 0) {
-      return { ok: false, error: 'Adicione ao menos uma divisão/faixa na distribuição de pontuação.' };
-    }
-    if (rawRules.length > 50) {
-      return { ok: false, error: 'Limite máximo de 50 divisões na distribuição de pontuação.' };
-    }
-    const seenValues = new Set<number>();
-    for (let idx = 0; idx < rawRules.length; idx++) {
-      const r = rawRules[idx];
-      const v = fatorDistribuicao === 'TEMPO' ? toOptionalInt(r?.valor) : toOptionalFloat(r?.valor);
-      const pts = toOptionalFloat(r?.pontos);
-      if (v === null || v < 0) {
-        return { ok: false, error: `Informe um valor válido na divisão #${idx + 1}.` };
-      }
-      if (pts === null || pts < notaMinima || pts > notaMaxima) {
-        return {
-          ok: false,
-          error: `A pontuação da divisão #${idx + 1} deve estar entre a nota mínima (${notaMinima}) e a máxima (${notaMaxima}).`
-        };
-      }
-      if (seenValues.has(v)) {
-        return {
-          ok: false,
-          error: `Valor duplicado na distribuição de pontuação (divisão #${idx + 1}). Informe valores distintos.`
-        };
-      }
-      seenValues.add(v);
-      regrasDistribuicao.push({ valor: v, pontos: pts });
-    }
-    regrasDistribuicao.sort((a, b) => a.valor - b.valor);
-  }
-
   let teveTiro = false;
   let tipoArma: string | null = null;
   let quantidadeTiros: number | null = null;
+  let quantidadeTirosPontuados: number | null = null;
 
   if (categoria === 'TATICO') {
     teveTiro = Boolean(body?.teveTiro);
@@ -605,10 +590,145 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
       }
       const qtd = toOptionalInt(body?.quantidadeTiros);
       if (qtd === null || qtd <= 0) {
-        return { ok: false, error: 'Informe uma quantidade de tiros maior que zero.' };
+        return { ok: false, error: 'Informe uma quantidade de tiros geral maior que zero.' };
+      }
+      const rawPont = body?.quantidadeTirosPontuados;
+      const qtdPont =
+        rawPont === undefined || rawPont === null || String(rawPont).trim() === ''
+          ? qtd
+          : toOptionalInt(rawPont);
+      if (qtdPont === null || qtdPont <= 0) {
+        return { ok: false, error: 'Informe quantos tiros serão pontuados (maior que zero).' };
+      }
+      if (qtdPont > qtd) {
+        return {
+          ok: false,
+          error: `A quantidade de tiros pontuados (${qtdPont}) não pode ser maior que a quantidade geral de tiros (${qtd}).`
+        };
       }
       tipoArma = rawArma;
       quantidadeTiros = qtd;
+      quantidadeTirosPontuados = qtdPont;
+    }
+  }
+
+  const usaDistribuicaoNota = Boolean(body?.usaDistribuicaoNota);
+  let fatorDistribuicao: FatorDistribuicaoNota | null = null;
+  let regrasDistribuicao: DesempenhoDistribuicaoFaixa[] = [];
+
+  if (usaDistribuicaoNota) {
+    fatorDistribuicao = normalizeFatorDistribuicao(body?.fatorDistribuicao);
+    if (!fatorDistribuicao) {
+      return {
+        ok: false,
+        error: 'Selecione o fator de distribuição de pontuação válido.'
+      };
+    }
+    if (categoria === 'FISICO' && fatorDistribuicao !== 'MARCA' && fatorDistribuicao !== 'TEMPO') {
+      return {
+        ok: false,
+        error: 'Para marcadores Físicos, utilize distribuição por Tipo de Marca ou Tempo.'
+      };
+    }
+    if (categoria === 'TATICO' && fatorDistribuicao === 'MARCA') {
+      return {
+        ok: false,
+        error: 'Para marcadores Táticos, utilize distribuição por Acertos, Tiros/Acertos por Tempo ou Tempo.'
+      };
+    }
+    if ((fatorDistribuicao === 'ACERTOS' || fatorDistribuicao === 'TIROS_TEMPO') && !(categoria === 'TATICO' && teveTiro)) {
+      return {
+        ok: false,
+        error: 'A distribuição por acertos ou taxa de tiro por segundo requer marcador Tático com disparo de arma de fogo.'
+      };
+    }
+    if (fatorDistribuicao === 'TEMPO' && !usaTempo) {
+      return {
+        ok: false,
+        error: 'Ative o controle de tempo para utilizar distribuição de pontuação por tempo.'
+      };
+    }
+
+    const rawRules = Array.isArray(body?.regrasDistribuicao) ? body.regrasDistribuicao : [];
+    if (rawRules.length === 0) {
+      return { ok: false, error: 'Adicione ao menos uma divisão/faixa na distribuição de pontuação.' };
+    }
+    if (rawRules.length > 50) {
+      return { ok: false, error: 'Limite máximo de 50 divisões na distribuição de pontuação.' };
+    }
+
+    const seenKeys = new Set<string>();
+    for (let idx = 0; idx < rawRules.length; idx++) {
+      const r = rawRules[idx];
+      const pts = toOptionalFloat(r?.pontos);
+      if (pts === null || pts < notaMinima || pts > notaMaxima) {
+        return {
+          ok: false,
+          error: `A pontuação da divisão #${idx + 1} deve estar entre a nota mínima (${notaMinima}) e a máxima (${notaMaxima}).`
+        };
+      }
+
+      if (fatorDistribuicao === 'TIROS_TEMPO') {
+        const v = toOptionalFloat(r?.valor);
+        const tSec = toOptionalFloat(r?.tempoSegundos);
+        if (v === null || v <= 0) {
+          return { ok: false, error: `Informe uma quantidade de tiros/acertos maior que zero na divisão #${idx + 1}.` };
+        }
+        if (tSec === null || tSec <= 0) {
+          return { ok: false, error: `Informe um tempo em segundos maior que zero na divisão #${idx + 1}.` };
+        }
+        if (quantidadeTiros !== null && v > quantidadeTiros) {
+          return {
+            ok: false,
+            error: `Na divisão #${idx + 1}, a quantidade de tiros/acertos (${v}) excede o total geral de tiros (${quantidadeTiros}).`
+          };
+        }
+        const rateKey = (Math.round((v / tSec) * 10000) / 10000).toFixed(4);
+        if (seenKeys.has(rateKey)) {
+          return {
+            ok: false,
+            error: `Taxa de tiros por segundo duplicada na divisão #${idx + 1}. Informe combinações com taxas distintas.`
+          };
+        }
+        seenKeys.add(rateKey);
+        regrasDistribuicao.push({
+          valor: Math.round(v * 100) / 100,
+          tempoSegundos: Math.round(tSec * 100) / 100,
+          pontos: Math.round(pts * 100) / 100
+        });
+      } else {
+        const v =
+          fatorDistribuicao === 'TEMPO' || fatorDistribuicao === 'ACERTOS'
+            ? toOptionalInt(r?.valor)
+            : toOptionalFloat(r?.valor);
+        if (v === null || v < 0) {
+          return { ok: false, error: `Informe um valor válido na divisão #${idx + 1}.` };
+        }
+        if (fatorDistribuicao === 'ACERTOS' && quantidadeTiros !== null && v > quantidadeTiros) {
+          return {
+            ok: false,
+            error: `Na divisão #${idx + 1}, a quantidade de acertos (${v}) excede o total geral de tiros (${quantidadeTiros}).`
+          };
+        }
+        const valKey = String(v);
+        if (seenKeys.has(valKey)) {
+          return {
+            ok: false,
+            error: `Valor duplicado na distribuição de pontuação (divisão #${idx + 1}). Informe valores distintos.`
+          };
+        }
+        seenKeys.add(valKey);
+        regrasDistribuicao.push({
+          valor: Math.round(v * 100) / 100,
+          pontos: Math.round(pts * 100) / 100
+        });
+      }
+    }
+
+    if (fatorDistribuicao === 'TIROS_TEMPO') {
+      regrasDistribuicao.sort((a, b) => computeTierRate(a) - computeTierRate(b));
+    } else {
+      regrasDistribuicao.sort((a, b) => a.valor - b.valor);
     }
   }
 
@@ -635,6 +755,7 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
       teveTiro,
       tipoArma,
       quantidadeTiros,
+      quantidadeTirosPontuados,
       descricao: descricaoRaw || null
     }
   };
@@ -720,9 +841,9 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
           NOTA_MIN, NOTA_MAX, NOTA_APROVACAO,
           USA_DISTRIBUICAO_NOTA, FATOR_DISTRIBUICAO, REGRAS_DISTRIBUICAO,
           DIFICULDADE,
-          TEVE_TIRO, TIPO_ARMA, QUANTIDADE_TIROS, DESCRICAO,
+          TEVE_TIRO, TIPO_ARMA, QUANTIDADE_TIROS, QUANTIDADE_TIROS_PONTUADOS, DESCRICAO,
           DEPARTAMENTO_ID, UNIDADE_ID, CRIADOR_ID, CRIADOR_NOME, ATIVO
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         [
           id,
           c.categoria,
@@ -745,6 +866,7 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
           c.teveTiro ? 1 : 0,
           c.tipoArma,
           c.quantidadeTiros,
+          c.quantidadeTirosPontuados,
           c.descricao,
           departmentId,
           unitId,
@@ -809,7 +931,7 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
           NOTA_MIN = ?, NOTA_MAX = ?, NOTA_APROVACAO = ?,
           USA_DISTRIBUICAO_NOTA = ?, FATOR_DISTRIBUICAO = ?, REGRAS_DISTRIBUICAO = ?,
           DIFICULDADE = ?,
-          TEVE_TIRO = ?, TIPO_ARMA = ?, QUANTIDADE_TIROS = ?, DESCRICAO = ?
+          TEVE_TIRO = ?, TIPO_ARMA = ?, QUANTIDADE_TIROS = ?, QUANTIDADE_TIROS_PONTUADOS = ?, DESCRICAO = ?
          WHERE ID_MARCADOR = ?`,
         [
           c.nome,
@@ -831,6 +953,7 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
           c.teveTiro ? 1 : 0,
           c.tipoArma,
           c.quantidadeTiros,
+          c.quantidadeTirosPontuados,
           c.descricao,
           id
         ]
@@ -1487,6 +1610,12 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
         const fatorDistribuicao = normalizeFatorDistribuicao(marker.FATOR_DISTRIBUICAO);
         const regrasDistribuicao = parseRegrasDistribuicao(marker.REGRAS_DISTRIBUICAO);
         const teveTiro = Boolean(Number(marker.TEVE_TIRO ?? 0));
+        const quantidadeTirosPontuadosRef =
+          teveTiro && marker.QUANTIDADE_TIROS_PONTUADOS != null
+            ? Number(marker.QUANTIDADE_TIROS_PONTUADOS)
+            : teveTiro && marker.QUANTIDADE_TIROS != null
+            ? Number(marker.QUANTIDADE_TIROS)
+            : null;
         const observacoes = item?.observacoes ? String(item.observacoes).trim().slice(0, 500) : null;
 
         const scoringMarker = {
@@ -1500,13 +1629,18 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
           notaAprovacao: notaAprovRef,
           usaDistribuicaoNota,
           fatorDistribuicao,
-          regrasDistribuicao
+          regrasDistribuicao,
+          teveTiro,
+          quantidadeTiros: marker.QUANTIDADE_TIROS != null ? Number(marker.QUANTIDADE_TIROS) : null,
+          quantidadeTirosPontuados: quantidadeTirosPontuadosRef
         };
 
         let clampedNota = 0;
         let valorMarca: number | null = null;
         let tempoSegundos: number | null = null;
         let tirosEfetuados: number | null = null;
+        let acertosTiros: number | null = null;
+        let taxaAcertoPorSegundo: number | null = null;
         let aprovado = 0;
         let ausenciaInformadaDb: number | null = null;
 
@@ -1521,16 +1655,33 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
           valorMarca = null;
           tempoSegundos = null;
           tirosEfetuados = null;
+          acertosTiros = null;
+          taxaAcertoPorSegundo = null;
           aprovado = 0;
         } else {
           valorMarca = toOptionalFloat(item?.valorMarca);
-          tempoSegundos = usaTempo ? toOptionalInt(item?.tempoSegundos) : null;
+          const acceptsTime = usaTempo || fatorDistribuicao === 'TIROS_TEMPO';
+          const parsedTime = acceptsTime ? toOptionalFloat(item?.tempoSegundos) : null;
+          tempoSegundos = parsedTime !== null && parsedTime >= 0 ? Math.round(parsedTime * 100) / 100 : null;
           tirosEfetuados = teveTiro ? toOptionalInt(item?.tirosEfetuados ?? marker.QUANTIDADE_TIROS) : null;
+          const rawAcertos = teveTiro ? toOptionalInt(item?.acertosTiros) : null;
+          if (rawAcertos !== null) {
+            const maxAcertos =
+              quantidadeTirosPontuadosRef ??
+              (marker.QUANTIDADE_TIROS != null ? Number(marker.QUANTIDADE_TIROS) : null);
+            acertosTiros = Math.max(0, maxAcertos !== null ? Math.min(maxAcertos, rawAcertos) : rawAcertos);
+          }
+          if (acertosTiros !== null && tempoSegundos !== null && tempoSegundos > 0) {
+            taxaAcertoPorSegundo = Math.round((acertosTiros / tempoSegundos) * 10000) / 10000;
+          }
 
           if (usaDistribuicaoNota && fatorDistribuicao && regrasDistribuicao.length > 0) {
-            const dist = calculateDistributedScore(scoringMarker, valorMarca, tempoSegundos);
+            const dist = calculateDistributedScore(scoringMarker, valorMarca, tempoSegundos, acertosTiros);
             if (dist.hasInput && dist.nota !== null) {
               clampedNota = dist.nota;
+              if (dist.achievedRate != null) {
+                taxaAcertoPorSegundo = dist.achievedRate;
+              }
             } else {
               const fallbackNota = toOptionalFloat(item?.notaObtida);
               if (fallbackNota === null) continue;
@@ -1554,9 +1705,11 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
             DATA_AVALIACAO, HORA_AVALIACAO,
             VALOR_MARCA, TEMPO_SEGUNDOS, NOTA_OBTIDA,
             NOTA_MIN_REF, NOTA_MAX_REF, NOTA_APROVACAO_REF, TEMPO_APROVACAO_REF, TEMPO_APROVACAO_MODO_REF,
-            APROVADO, AUSENTE, AUSENCIA_INFORMADA, TEVE_TIRO, TIPO_ARMA, TIROS_EFETUADOS, OBSERVACOES,
+            APROVADO, AUSENTE, AUSENCIA_INFORMADA,
+            TEVE_TIRO, TIPO_ARMA, TIROS_EFETUADOS, QUANTIDADE_TIROS_PONTUADOS_REF, ACERTOS_TIROS, TAXA_ACERTO_POR_SEGUNDO,
+            OBSERVACOES,
             LANCADO_POR_ID, LANCADO_POR_NOME
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON DUPLICATE KEY UPDATE
             VALOR_MARCA = VALUES(VALOR_MARCA),
             TEMPO_SEGUNDOS = VALUES(TEMPO_SEGUNDOS),
@@ -1566,6 +1719,9 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
             AUSENTE = VALUES(AUSENTE),
             AUSENCIA_INFORMADA = VALUES(AUSENCIA_INFORMADA),
             TIROS_EFETUADOS = VALUES(TIROS_EFETUADOS),
+            QUANTIDADE_TIROS_PONTUADOS_REF = VALUES(QUANTIDADE_TIROS_PONTUADOS_REF),
+            ACERTOS_TIROS = VALUES(ACERTOS_TIROS),
+            TAXA_ACERTO_POR_SEGUNDO = VALUES(TAXA_ACERTO_POR_SEGUNDO),
             OBSERVACOES = VALUES(OBSERVACOES),
             LANCADO_POR_ID = VALUES(LANCADO_POR_ID),
             LANCADO_POR_NOME = VALUES(LANCADO_POR_NOME),
@@ -1600,6 +1756,9 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
             teveTiro ? 1 : 0,
             marker.TIPO_ARMA ? String(marker.TIPO_ARMA) : null,
             tirosEfetuados,
+            quantidadeTirosPontuadosRef,
+            acertosTiros,
+            taxaAcertoPorSegundo,
             observacoes,
             actor.id,
             actor.name

@@ -2393,10 +2393,11 @@ export type TipoArmaDesempenho = 'Fuzil' | 'Pistola' | 'Espingarda' | 'Submetral
 export type ModoLancamentoDesempenho = 'INDIVIDUAL' | 'COLETIVO';
 export type StatusGrupoDesempenho = 'ABERTO' | 'ENCERRADO';
 export type TempoAprovacaoModo = 'MENOR_IGUAL' | 'MAIOR_IGUAL';
-export type FatorDistribuicaoNota = 'MARCA' | 'TEMPO';
+export type FatorDistribuicaoNota = 'MARCA' | 'TEMPO' | 'ACERTOS' | 'TIROS_TEMPO';
 
 export interface DesempenhoDistribuicaoFaixa {
-  valor: number; // Se fator === 'MARCA': valor na unidade de medida; se fator === 'TEMPO': segundos
+  valor: number; // MARCA: unidade de medida; TEMPO: segundos; ACERTOS: qtd acertos; TIROS_TEMPO: qtd tiros/acertos
+  tempoSegundos?: number | null; // Usado em TIROS_TEMPO (ex: 2 tiros em 1 segundo -> valor: 2, tempoSegundos: 1)
   pontos: number; // Pontuação/nota correspondente à faixa
 }
 
@@ -2416,12 +2417,13 @@ export interface DesempenhoMarcador {
   notaMaxima: number;
   notaAprovacao: number;
   usaDistribuicaoNota?: boolean; // Habilita cálculo automático de nota por faixas/divisões
-  fatorDistribuicao?: FatorDistribuicaoNota | null; // 'MARCA' ou 'TEMPO'
+  fatorDistribuicao?: FatorDistribuicaoNota | null; // 'MARCA', 'TEMPO', 'ACERTOS' ou 'TIROS_TEMPO'
   regrasDistribuicao?: DesempenhoDistribuicaoFaixa[];
   dificuldade: DificuldadeDesempenho | string;
   teveTiro: boolean; // Para TATICO
   tipoArma?: TipoArmaDesempenho | null;
-  quantidadeTiros?: number | null;
+  quantidadeTiros?: number | null; // Quantidade de tiros geral (ex: 30)
+  quantidadeTirosPontuados?: number | null; // Quantidade dos tiros selecionados que serão pontuados na prova (ex: 10)
   descricao?: string | null; // Máx 200 linhas
   departmentId?: string | null;
   unitId?: string | null;
@@ -2479,7 +2481,7 @@ export interface DesempenhoResultado {
   dataAvaliacao: string; // YYYY-MM-DD
   horaAvaliacao?: string | null; // HH:mm
   valorMarca?: number | null; // Ex: 35 (flexões), 2400 (metros)
-  tempoSegundos?: number | null; // Ex: 60 (1 minuto)
+  tempoSegundos?: number | null; // Ex: 60 ou 1.50 (segundos, suporta frações para tiro tático)
   notaObtida: number; // Ex: 10
   notaMaxRef: number;
   notaMinRef?: number;
@@ -2492,6 +2494,9 @@ export interface DesempenhoResultado {
   teveTiro: boolean;
   tipoArma?: TipoArmaDesempenho | null;
   tirosEfetuados?: number | null;
+  quantidadeTirosPontuadosRef?: number | null;
+  acertosTiros?: number | null;
+  taxaAcertoPorSegundo?: number | null;
   observacoes?: string | null;
   lancadoPorId?: string;
   lancadoPorNome?: string;

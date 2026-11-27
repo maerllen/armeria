@@ -1686,7 +1686,13 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         ? allDepartments.find(d => d.id === selectedDept)
         : allDepartments.find(d => d.id === currentUser.departmentId));
 
-    const logoSrc = getSystemLogo(targetUnitObj, targetDeptObj);
+    const issuerUnitObj = allUnits.find(u => u.id === currentUser.unitId) || targetUnitObj;
+    const issuerDeptObj =
+      (issuerUnitObj && allDepartments.find(d => d.id === issuerUnitObj.departmentId)) ||
+      allDepartments.find(d => d.id === currentUser.departmentId) ||
+      targetDeptObj;
+
+    const logoSrc = getSystemLogo(issuerUnitObj, issuerDeptObj);
     const unitTitle =
       targetUnitId === 'ALL'
         ? isUnitOnly
@@ -1795,7 +1801,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
             </div>
           </div>
           <div class="meta">
-            <div>Emissor: <strong>${escapeHtml(currentUser.name)}</strong> (MASP: ${escapeHtml(currentUser.masp)})</div>
+            <div>Emissor: <strong>${escapeHtml(currentUser.name)}</strong> (MASP: ${escapeHtml(currentUser.masp)})${issuerUnitObj?.name ? ` • ${escapeHtml(issuerUnitObj.name)}` : ''}</div>
             <div>Escopo: ${applyScreenFilters ? 'Com Filtros da Tela' : 'Relatório Completo da Unidade'}</div>
             <div>Emitido em: ${new Date().toLocaleString('pt-BR')}</div>
           </div>

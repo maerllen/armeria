@@ -273,13 +273,17 @@ export function printRelatorioOperacaoPolicial(
   units: Unit[],
   departments: Department[],
   fallbackUnitName?: string,
-  fallbackDeptName?: string
+  fallbackDeptName?: string,
+  issuerUser?: User | null
 ) {
   const unitObj = units.find(u => u.id === rel.unitId);
   const deptObj = departments.find(d => d.id === (rel.departmentId || unitObj?.departmentId));
-  const logoUrl = getSystemLogo(unitObj, deptObj);
-  const unitLabel = rel.unitName || unitObj?.name || fallbackUnitName || 'Unidade Policial';
-  const deptLabel = deptObj?.name || fallbackDeptName || 'Polícia Civil de Minas Gerais';
+  const issuerUnitObj = (issuerUser?.unitId && units.find(u => u.id === issuerUser.unitId)) || unitObj;
+  const issuerDeptObj =
+    departments.find(d => d.id === (issuerUnitObj?.departmentId || issuerUser?.departmentId)) || deptObj;
+  const logoUrl = getSystemLogo(issuerUnitObj, issuerDeptObj);
+  const unitLabel = issuerUnitObj?.name || rel.unitName || unitObj?.name || fallbackUnitName || 'Unidade Policial';
+  const deptLabel = issuerDeptObj?.name || deptObj?.name || fallbackDeptName || 'Polícia Civil de Minas Gerais';
 
   const municipiosTodos = [
     `${rel.municipioOperacao}/${rel.estadoOperacao}`,
@@ -1320,7 +1324,7 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
       resetForm();
       if (onSaved) onSaved();
       if (shouldPrint && savedData) {
-        printRelatorioOperacaoPolicial(savedData, units, departments, activeUnitName, activeDeptName);
+        printRelatorioOperacaoPolicial(savedData, units, departments, activeUnitName, activeDeptName, currentUser);
       }
     } finally {
       setIsSubmitting(false);

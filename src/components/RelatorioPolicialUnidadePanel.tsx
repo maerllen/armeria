@@ -1028,9 +1028,10 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       return;
     }
 
-    const unitObj = units.find(u => u.id === effectiveUnitId);
-    const deptObj = departments.find(d => d.id === effectiveDeptId);
-    const logoUrl = getSystemLogo(unitObj, deptObj);
+    const issuerUnitObj = units.find(u => u.id === currentUser.unitId) || units.find(u => u.id === effectiveUnitId);
+    const issuerDeptObj =
+      departments.find(d => d.id === (issuerUnitObj?.departmentId || currentUser.departmentId || effectiveDeptId));
+    const logoUrl = getSystemLogo(issuerUnitObj, issuerDeptObj);
     const docTitle = buildStandardDocumentTitle(
       `Histórico de Relatórios da Unidade — ${activeUnitName}`,
       activeUnitName,
@@ -1429,9 +1430,12 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
   const handlePrintReport = (rel: RelatorioTreinamentoPolicial) => {
     const unitObj = units.find(u => u.id === (rel.unitId || effectiveUnitId));
     const deptObj = departments.find(d => d.id === (rel.departmentId || unitObj?.departmentId || effectiveDeptId));
-    const logoUrl = getSystemLogo(unitObj, deptObj);
-    const unitLabel = rel.unitName || unitObj?.name || activeUnitName || 'Unidade Policial';
-    const deptLabel = deptObj?.name || activeDeptName || 'Polícia Civil de Minas Gerais';
+    const issuerUnitObj = units.find(u => u.id === currentUser.unitId) || unitObj;
+    const issuerDeptObj =
+      departments.find(d => d.id === (issuerUnitObj?.departmentId || currentUser.departmentId)) || deptObj;
+    const logoUrl = getSystemLogo(issuerUnitObj, issuerDeptObj);
+    const unitLabel = issuerUnitObj?.name || rel.unitName || unitObj?.name || activeUnitName || 'Unidade Policial';
+    const deptLabel = issuerDeptObj?.name || deptObj?.name || activeDeptName || 'Polícia Civil de Minas Gerais';
 
     const participantsList = Array.isArray(rel.participantes) ? rel.participantes : [];
     const isColetivoMulti = rel.modalidadeParticipacao === 'Coletivo' && participantsList.length > 0;
@@ -3158,7 +3162,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                     units,
                                     departments,
                                     activeUnitName,
-                                    activeDeptName
+                                    activeDeptName,
+                                    currentUser
                                   )
                                 }
                                 className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center space-x-1 transition"
@@ -3398,7 +3403,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                     units,
                                     departments,
                                     activeUnitName,
-                                    activeDeptName
+                                    activeDeptName,
+                                    currentUser
                                   )
                                 }
                                 className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center space-x-1 transition"
@@ -4139,7 +4145,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                     units,
                                     departments,
                                     activeUnitName,
-                                    activeDeptName
+                                    activeDeptName,
+                                    currentUser
                                   )
                                 }
                                 className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center space-x-1 transition"
@@ -4323,7 +4330,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                     units,
                                     departments,
                                     activeUnitName,
-                                    activeDeptName
+                                    activeDeptName,
+                                    currentUser
                                   )
                                 }
                                 className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center space-x-1 transition"
@@ -4945,7 +4953,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                             units,
                             departments,
                             activeUnitName,
-                            activeDeptName
+                            activeDeptName,
+                            currentUser
                           )
                         }
                         className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center space-x-1.5"
@@ -5440,7 +5449,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                             units,
                             departments,
                             activeUnitName,
-                            activeDeptName
+                            activeDeptName,
+                            currentUser
                           )
                         }
                         className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center space-x-1.5"

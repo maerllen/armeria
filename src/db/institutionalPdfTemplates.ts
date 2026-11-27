@@ -745,6 +745,7 @@ export async function generateSystemArmasPdf(params: {
   filtroTipoLabel: string;
   departamentoLabel: string;
   unidadeLabel: string;
+  unidadeEmissoraLabel?: string | null;
   solicitacaoId: string;
   geradoEm: Date;
   solicitanteNome: string;
@@ -857,7 +858,10 @@ export async function generateSystemArmasPdf(params: {
       font: fontBold,
       color: PCMG_COLORS.black
     });
-    page.drawText(fitTextToWidth(params.departamentoLabel.toUpperCase(), fontBold, 8.2, titleMaxW), {
+    const issuerHeaderLine = params.unidadeEmissoraLabel
+      ? `${params.unidadeEmissoraLabel.toUpperCase()} - ${params.departamentoLabel.toUpperCase()}`
+      : params.departamentoLabel.toUpperCase();
+    page.drawText(fitTextToWidth(issuerHeaderLine, fontBold, 8.2, titleMaxW), {
       x: textX,
       y: headerTopY - 23,
       size: 8.2,
@@ -1411,6 +1415,7 @@ export async function generateSystemMunicoesPdf(params: {
   modoRelatorio: 'por_calibre' | 'por_unidade';
   departamentoLabel: string;
   unidadeLabel: string;
+  unidadeEmissoraLabel?: string | null;
   solicitacaoId: string;
   geradoEm: Date;
   solicitanteNome: string;
@@ -1541,14 +1546,17 @@ export async function generateSystemMunicoesPdf(params: {
       font: fontBold,
       color: PCMG_COLORS.black
     });
-    page.drawText(fitTextToWidth(params.departamentoLabel, fontBold, 8.2, titleMaxW), {
+    const munIssuerLine = params.unidadeEmissoraLabel
+      ? `${params.unidadeEmissoraLabel} - ${params.departamentoLabel}`
+      : params.departamentoLabel;
+    page.drawText(fitTextToWidth(munIssuerLine, fontBold, 8.2, titleMaxW), {
       x: textX,
       y: headerTopY - 24,
       size: 8.2,
       font: fontBold,
       color: PCMG_COLORS.slate700
     });
-    page.drawText(fitTextToWidth(unitDisplayLabel, fontRegular, 8, titleMaxW), {
+    page.drawText(fitTextToWidth(`Unidade Consultada: ${unitDisplayLabel}`, fontRegular, 8, titleMaxW), {
       x: textX,
       y: headerTopY - 36,
       size: 8,
@@ -2026,6 +2034,7 @@ export interface SystemExplosivoPdfRecord {
 export async function generateSystemExplosivosPdf(params: {
   departamentoLabel: string;
   unidadeLabel: string;
+  unidadeEmissoraLabel?: string | null;
   solicitacaoId: string;
   geradoEm: Date;
   solicitanteNome: string;
@@ -2134,7 +2143,9 @@ export async function generateSystemExplosivosPdf(params: {
 
     const h1 = 'POLICIA CIVIL DE MINAS GERAIS';
     const h2 = 'RELATORIO DE INVENTARIO DO PAIOL DE EXPLOSIVOS';
-    const h3 = `Departamento: ${params.departamentoLabel}  |  Unidade: ${unitDisplayLabel}  |  Emissao: ${emissaoBr}`;
+    const h3 = params.unidadeEmissoraLabel && params.unidadeEmissoraLabel !== unitDisplayLabel
+      ? `Emissor: ${params.unidadeEmissoraLabel} (${params.departamentoLabel})  |  Unidade Consultada: ${unitDisplayLabel}  |  Emissao: ${emissaoBr}`
+      : `Departamento: ${params.departamentoLabel}  |  Unidade: ${unitDisplayLabel}  |  Emissao: ${emissaoBr}`;
 
     page.drawText(h1, {
       x: (pageWidth - fontBold.widthOfTextAtSize(h1, 13)) / 2,
@@ -2514,6 +2525,7 @@ export interface SystemMaterialPdfRecord {
 export async function generateSystemMateriaisPdf(params: {
   departamentoLabel: string;
   unidadeLabel: string;
+  unidadeEmissoraLabel?: string | null;
   solicitacaoId: string;
   geradoEm: Date;
   solicitanteNome: string;
@@ -2639,7 +2651,10 @@ export async function generateSystemMateriaisPdf(params: {
       font: fontBold,
       color: PCMG_COLORS.slate900
     });
-    page.drawText(`SISTEMA DE ARMARIA - RELATORIO DE MATERIAIS (${unitDisplayLabel.toUpperCase()})`, {
+    const matHeaderSub = params.unidadeEmissoraLabel
+      ? `${params.unidadeEmissoraLabel.toUpperCase()} - RELATORIO DE MATERIAIS (${unitDisplayLabel.toUpperCase()})`
+      : `SISTEMA DE ARMARIA - RELATORIO DE MATERIAIS (${unitDisplayLabel.toUpperCase()})`;
+    page.drawText(fitTextToWidth(matHeaderSub, fontBold, 8.5, contentWidth - (textX - marginX) - 210), {
       x: textX,
       y: headerTopY - 29,
       size: 8.5,
@@ -3101,6 +3116,7 @@ function sumCatFlightHoursHHMM(aeronaves: Array<{ horasVoo?: string }>): string 
 export async function generateSystemSinopseOperacionalPdf(params: {
   departamentoLabel: string;
   unidadeLabel: string;
+  unidadeEmissoraLabel?: string | null;
   isTodosUnidades: boolean;
   periodoLabel: string;
   solicitacaoId: string;
@@ -3206,13 +3222,13 @@ export async function generateSystemSinopseOperacionalPdf(params: {
       font: fontBold,
       color: PCMG_COLORS.ink
     });
+    const layoutUnit = params.unidadeEmissoraLabel || params.unidadeLabel;
+    const subUnitText =
+      params.unidadeEmissoraLabel && params.unidadeEmissoraLabel !== params.unidadeLabel
+        ? `${params.departamentoLabel} - ${layoutUnit} | Unidade Consultada: ${params.unidadeLabel}`
+        : `${params.departamentoLabel} - Unidade: ${layoutUnit}`;
     page.drawText(
-      fitTextToWidth(
-        `${params.departamentoLabel} - Unidade: ${params.unidadeLabel}`,
-        fontRegular,
-        8.6,
-        titleMaxW
-      ),
+      fitTextToWidth(subUnitText, fontRegular, 8.6, titleMaxW),
       {
         x: textX,
         y: headerTopY - 29,
@@ -3754,6 +3770,7 @@ export interface SystemCanilTreinPdfRecord {
 export async function generateSystemSinopseTreinamentoPdf(params: {
   departamentoLabel: string;
   unidadeLabel: string;
+  unidadeEmissoraLabel?: string | null;
   isTodosUnidades: boolean;
   periodoLabel: string;
   solicitacaoId: string;
@@ -3850,13 +3867,13 @@ export async function generateSystemSinopseTreinamentoPdf(params: {
       font: fontBold,
       color: PCMG_COLORS.ink
     });
+    const layoutUnit = params.unidadeEmissoraLabel || params.unidadeLabel;
+    const subUnitText =
+      params.unidadeEmissoraLabel && params.unidadeEmissoraLabel !== params.unidadeLabel
+        ? `${params.departamentoLabel} - ${layoutUnit} | Unidade Consultada: ${params.unidadeLabel}`
+        : `${params.departamentoLabel} - Unidade: ${layoutUnit}`;
     page.drawText(
-      fitTextToWidth(
-        `${params.departamentoLabel} - Unidade: ${params.unidadeLabel}`,
-        fontRegular,
-        8.6,
-        titleMaxW
-      ),
+      fitTextToWidth(subUnitText, fontRegular, 8.6, titleMaxW),
       {
         x: textX,
         y: headerTopY - 29,
@@ -4300,6 +4317,9 @@ export interface SystemDesempenhoResultadoPdf {
   teveTiro: boolean;
   tipoArma?: string | null;
   tirosEfetuados?: number | null;
+  quantidadeTirosPontuadosRef?: number | null;
+  acertosTiros?: number | null;
+  taxaAcertoPorSegundo?: number | null;
   observacoes?: string | null;
   createdAt?: string | null;
 }
@@ -4331,6 +4351,7 @@ export interface SystemDesempenhoMarcadorPdf {
   teveTiro: boolean;
   tipoArma?: string | null;
   quantidadeTiros?: number | null;
+  quantidadeTirosPontuados?: number | null;
   descricao?: string | null;
   totalAvaliacoesAno: number;
 }
@@ -4351,6 +4372,7 @@ export interface SystemFichaIndividualPdfParams {
   anoReferencia: number;
   departamentoLabel: string;
   unidadeLabel: string;
+  unidadeEmissoraLabel?: string | null;
   solicitacaoId: string;
   geradoEm: Date;
   solicitanteNome: string;
@@ -4364,6 +4386,7 @@ export interface SystemFichaUnidadePdfParams {
   anoReferencia: number;
   departamentoLabel: string;
   unidadeLabel: string;
+  unidadeEmissoraLabel?: string | null;
   solicitacaoId: string;
   geradoEm: Date;
   solicitanteNome: string;
@@ -4438,6 +4461,7 @@ export interface SystemFichaK9PdfParams {
   anoReferencia: number;
   departamentoLabel: string;
   unidadeLabel: string;
+  unidadeEmissoraLabel?: string | null;
   solicitacaoId: string;
   geradoEm: Date;
   solicitanteNome: string;
@@ -4480,17 +4504,27 @@ function fmtDateTimeStrBrPdf(dt?: string | null): string {
 
 function fmtSecondsHumanPdf(seconds?: number | null): string {
   if (seconds === undefined || seconds === null || !Number.isFinite(seconds)) return '-';
-  const s = Math.max(0, Math.round(seconds));
+  const clamped = Math.max(0, Math.round(seconds * 100) / 100);
+  if (!Number.isInteger(clamped) && clamped < 60) {
+    return `${fmtNumBrPdf(clamped)}s`;
+  }
+  const s = Math.floor(clamped);
+  const frac = Math.round((clamped - s) * 100) / 100;
   const mins = Math.floor(s / 60);
   const rem = s % 60;
-  if (mins === 0) return `${rem}s`;
-  if (rem === 0) return mins === 1 ? '1 minuto' : `${mins} minutos`;
+  if (mins === 0) return `${fmtNumBrPdf(rem + frac)}s`;
+  if (rem === 0 && frac === 0) return mins === 1 ? '1 minuto' : `${mins} minutos`;
+  if (frac > 0) return `${mins}m ${fmtNumBrPdf(rem + frac)}s`;
   return `${mins}m ${String(rem).padStart(2, '0')}s`;
 }
 
 function fmtSecondsCompactPdf(seconds?: number | null): string {
   if (seconds === undefined || seconds === null || !Number.isFinite(seconds)) return '-';
-  const s = Math.max(0, Math.round(seconds));
+  const clamped = Math.max(0, Math.round(seconds * 100) / 100);
+  if (!Number.isInteger(clamped) && clamped < 60) {
+    return `${fmtNumBrPdf(clamped)}s`;
+  }
+  const s = Math.max(0, Math.round(clamped));
   const mins = Math.floor(s / 60);
   const rem = s % 60;
   return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
@@ -4517,8 +4551,15 @@ function formatResultadoResumoPdf(r: SystemDesempenhoResultadoPdf): string {
     const unitLabel = r.unidadeMedida || (r.tipoMarca === 'Distância' ? 'm' : r.tipoMarca === 'Repetição' ? 'rep.' : 'exec.');
     parts.push(`${fmtNumBrPdf(r.valorMarca)} ${unitLabel}`);
   }
+  if (r.acertosTiros !== undefined && r.acertosTiros !== null) {
+    const scoredRef = r.quantidadeTirosPontuadosRef ? `/${r.quantidadeTirosPontuadosRef}` : '';
+    parts.push(`${fmtNumBrPdf(r.acertosTiros)}${scoredRef} acertos`);
+  }
   if (r.tempoSegundos !== undefined && r.tempoSegundos !== null) {
     parts.push(`em ${fmtSecondsHumanPdf(r.tempoSegundos)}`);
+  }
+  if (r.taxaAcertoPorSegundo !== undefined && r.taxaAcertoPorSegundo !== null) {
+    parts.push(`(${fmtNumBrPdf(r.taxaAcertoPorSegundo)}/s)`);
   }
   const left = parts.join(' ');
   const pts = `${fmtNumBrPdf(r.notaObtida)} pts`;
@@ -4802,6 +4843,7 @@ async function renderSingleUserPerformancePage(opts: {
   anoReferencia: number;
   departamentoLabel: string;
   unidadeLabel: string;
+  unidadeEmissoraLabel?: string | null;
   solicitanteNome: string;
   usuario: SystemDesempenhoUsuarioPdf;
   singlePageStrict: boolean;
@@ -4822,6 +4864,7 @@ async function renderSingleUserPerformancePage(opts: {
     anoReferencia,
     departamentoLabel,
     unidadeLabel,
+    unidadeEmissoraLabel,
     solicitanteNome,
     usuario,
     singlePageStrict
@@ -4831,6 +4874,7 @@ async function renderSingleUserPerformancePage(opts: {
   const catTitle = categoria === 'FISICO' ? 'TREINAMENTO FISICO' : 'TREINAMENTO TECNICO / TATICO (OPERACIONAL)';
   const catShort = categoria === 'FISICO' ? 'Fisico' : 'Operacional / Tatico';
   const stats = computeUserPerformanceStats(usuario.resultados);
+  const layoutUnitLabel = unidadeEmissoraLabel || unidadeLabel;
 
   const drawPageTopHeader = (p: PDFPage): number => {
     let curY = drawTopUniqueCodeBar(p, pageWidth, pageHeight, marginX, fontMono, fontMonoBold, docCode, emissaoBr);
@@ -4868,7 +4912,7 @@ async function renderSingleUserPerformancePage(opts: {
       }
     );
     p.drawText(
-      fitTextToWidth(`${unidadeLabel} - ${departamentoLabel} | Ano ${anoReferencia}`, fontRegular, 7.5, contentWidth - (textStartX - marginX) - 135),
+      fitTextToWidth(`${layoutUnitLabel} - ${departamentoLabel} | Ano ${anoReferencia}`, fontRegular, 7.5, contentWidth - (textStartX - marginX) - 135),
       {
         x: textStartX,
         y: headerTop - 32,
@@ -5455,6 +5499,7 @@ export async function generateSystemFichaDesempenhoIndividualPdf(
     anoReferencia: params.anoReferencia,
     departamentoLabel: params.departamentoLabel,
     unidadeLabel: params.unidadeLabel,
+    unidadeEmissoraLabel: params.unidadeEmissoraLabel,
     solicitanteNome: params.solicitanteNome,
     usuario: params.usuario,
     singlePageStrict: false
@@ -5511,8 +5556,13 @@ export async function generateSystemFichaDesempenhoUnidadePdf(
       fitTextToWidth(`QUADRO RESUMO DA UNIDADE - ${catTitle}`, fontBold, 11, contentWidth - (textStartX - marginX) - 130),
       { x: textStartX, y: headerTop - 22, size: 11, font: fontBold, color: PCMG_COLORS.ink }
     );
+    const layoutUnit = params.unidadeEmissoraLabel || params.unidadeLabel;
+    const summarySubLine =
+      params.unidadeEmissoraLabel && params.unidadeEmissoraLabel !== params.unidadeLabel
+        ? `${layoutUnit} - ${params.departamentoLabel} | Unidade Consultada: ${params.unidadeLabel} | Ano ${params.anoReferencia}`
+        : `${layoutUnit} - ${params.departamentoLabel} | Ano ${params.anoReferencia}`;
     p.drawText(
-      fitTextToWidth(`${params.unidadeLabel} - ${params.departamentoLabel} | Ano ${params.anoReferencia}`, fontRegular, 7.8, contentWidth - (textStartX - marginX) - 130),
+      fitTextToWidth(summarySubLine, fontRegular, 7.8, contentWidth - (textStartX - marginX) - 130),
       { x: textStartX, y: headerTop - 34, size: 7.8, font: fontRegular, color: PCMG_COLORS.slate600 }
     );
 
@@ -5614,7 +5664,11 @@ export async function generateSystemFichaDesempenhoUnidadePdf(
             ? `${m.tipoMarca || 'Fisico'} / ${fmtNumBrPdf(m.valorReferencia)} ${m.unidadeMedida || ''}`.trim()
             : [m.tipoMarca, m.unidadeMedida].filter(Boolean).join(' / ') || 'Fisico'
           : m.teveTiro
-          ? `${m.tipoArma || 'Arma'}${m.quantidadeTiros ? ` (${m.quantidadeTiros} tiros)` : ''}`
+          ? `${m.tipoArma || 'Arma'}${
+              m.quantidadeTiros
+                ? ` (${m.quantidadeTiros}t${m.quantidadeTirosPontuados ? `/${m.quantidadeTirosPontuados}p` : ''})`
+                : ''
+            }`
           : 'Sem disparo';
       const tempoCmp = m.tempoAprovacaoModo === 'MAIOR_IGUAL' ? '>=' : '<=';
       const metaCol = `>= ${fmtNumBrPdf(m.notaAprovacao)}/${fmtNumBrPdf(m.notaMax)} pts${
@@ -5733,6 +5787,7 @@ export async function generateSystemFichaDesempenhoUnidadePdf(
       anoReferencia: params.anoReferencia,
       departamentoLabel: params.departamentoLabel,
       unidadeLabel: params.unidadeLabel,
+      unidadeEmissoraLabel: params.unidadeEmissoraLabel,
       solicitanteNome: params.solicitanteNome,
       usuario,
       singlePageStrict: true
@@ -5816,8 +5871,9 @@ export async function generateSystemFichaDesempenhoK9Pdf(
       p.drawImage(logoImage, { x: marginX, y: topY - dims.height - 2, width: dims.width, height: dims.height });
       textX = marginX + dims.width + 9;
     }
+    const layoutUnit = params.unidadeEmissoraLabel || params.unidadeLabel;
     p.drawText(
-      fitTextToWidth(`POLICIA CIVIL DE MINAS GERAIS - ${params.unidadeLabel}`, fontBold, 10, contentWidth - (textX - marginX) - 125),
+      fitTextToWidth(`POLICIA CIVIL DE MINAS GERAIS - ${layoutUnit}`, fontBold, 10, contentWidth - (textX - marginX) - 125),
       { x: textX, y: topY - 13, size: 10, font: fontBold, color: PCMG_COLORS.ink }
     );
     p.drawText(
@@ -5826,7 +5882,7 @@ export async function generateSystemFichaDesempenhoK9Pdf(
     );
 
     const r1 = `Emissao: ${fmtIsoDateBrPdf(todayIso)}`;
-    const r2 = `${params.departamentoLabel} - ${params.unidadeLabel}`;
+    const r2 = `${params.departamentoLabel} - ${layoutUnit}`;
     const r3 = `Ano Referencia: ${params.anoReferencia}`;
     [r1, r2, r3].forEach((rl, i) => {
       const rw = fontRegular.widthOfTextAtSize(rl, 7);

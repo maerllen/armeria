@@ -265,6 +265,50 @@ interface ResolvedUnitSelection {
   fileSlug: string;
   unitIds: string[];
   logoDataUri: string | null;
+  issuerUnitName: string | null;
+}
+
+async function resolveIssuerUnitLayout(
+  pool: any,
+  user: ResolvedWhatsappUser
+): Promise<{ issuerUnitName: string | null; departmentName: string | null; logoDataUri: string | null }> {
+  let issuerUnitName: string | null = null;
+  let departmentName: string | null = null;
+  let logoDataUri: string | null = null;
+  let deptIdToLoad: string | null = user.departmentId || null;
+
+  if (user.unitId) {
+    try {
+      const [uRows]: any = await pool.query(
+        'SELECT NOME_UNIDADES, DEPARTAMENTO_ID_UNIDADES, LOGO_URL_UNIDADES FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+        [user.unitId]
+      );
+      if (uRows?.[0]) {
+        issuerUnitName = uRows[0].NOME_UNIDADES ? String(uRows[0].NOME_UNIDADES) : null;
+        logoDataUri = uRows[0].LOGO_URL_UNIDADES || null;
+        if (uRows[0].DEPARTAMENTO_ID_UNIDADES) {
+          deptIdToLoad = String(uRows[0].DEPARTAMENTO_ID_UNIDADES);
+        }
+      }
+    } catch {}
+  }
+
+  if (deptIdToLoad) {
+    try {
+      const [dRows]: any = await pool.query(
+        'SELECT NOME_DEPARTAMENTOS, LOGO_URL_DEPARTAMENTOS FROM DEPARTAMENTOS WHERE ID_DEPARTAMENTOS = ? LIMIT 1',
+        [deptIdToLoad]
+      );
+      if (dRows?.[0]?.NOME_DEPARTAMENTOS) {
+        departmentName = String(dRows[0].NOME_DEPARTAMENTOS);
+      }
+      if (!logoDataUri && dRows?.[0]?.LOGO_URL_DEPARTAMENTOS) {
+        logoDataUri = dRows[0].LOGO_URL_DEPARTAMENTOS;
+      }
+    } catch {}
+  }
+
+  return { issuerUnitName, departmentName, logoDataUri };
 }
 
 type WeaponReportKey = 'fuzis' | 'submetralhadoras' | 'espingardas';
@@ -369,6 +413,8 @@ async function resolveUnitSelectionForUser(
     candidateAlt === 'TODOS' ||
     candidateAlt === 'TODAS';
 
+  const issuerLayout = await resolveIssuerUnitLayout(pool, user);
+
   if (isTodos) {
     const canQueryMultiple = user.isGlobal || (user.isArmeiroOrAdmin && user.permittedUnits.length > 1);
     if (!canQueryMultiple) {
@@ -380,28 +426,16 @@ async function resolveUnitSelectionForUser(
       };
     }
 
-    let deptLogo: string | null = null;
-    let deptName = 'POLÍCIA CIVIL DE MINAS GERAIS';
-    if (user.departmentId) {
-      try {
-        const [dRows]: any = await pool.query(
-          'SELECT NOME_DEPARTAMENTOS, LOGO_URL_DEPARTAMENTOS FROM DEPARTAMENTOS WHERE ID_DEPARTAMENTOS = ? LIMIT 1',
-          [user.departmentId]
-        );
-        deptLogo = dRows?.[0]?.LOGO_URL_DEPARTAMENTOS || null;
-        if (dRows?.[0]?.NOME_DEPARTAMENTOS) deptName = String(dRows[0].NOME_DEPARTAMENTOS);
-      } catch {}
-    }
-
     return {
       ok: true,
       selection: {
         isTodos: true,
         displayName: user.isGlobal ? 'Todas as Unidades' : 'Todas as Unidades Permitidas',
-        departmentName: deptName,
+        departmentName: issuerLayout.departmentName || 'POLÍCIA CIVIL DE MINAS GERAIS',
         fileSlug: 'TODOS',
         unitIds: user.isGlobal ? [] : user.permittedUnits.map(u => u.id),
-        logoDataUri: deptLogo
+        logoDataUri: issuerLayout.logoDataUri,
+        issuerUnitName: issuerLayout.issuerUnitName
       }
     };
   }
@@ -447,15 +481,18 @@ async function resolveUnitSelectionForUser(
     };
   }
 
-  let logoDataUri: string | null = matchUnit.LOGO_URL_UNIDADES || null;
-  let departmentName = 'POLÍCIA CIVIL DE MINAS GERAIS';
-  if (matchUnit.DEPARTAMENTO_ID_UNIDADES) {
+  // Layout (brasão/departamento/unidade emissora) segue prioritariamente a unidade cadastrada do usuário emissor
+  let logoDataUri: string | null = issuerLayout.logoDataUri || matchUnit.LOGO_URL_UNIDADES || null;
+  let departmentName = issuerLayout.departmentName || 'POLÍCIA CIVIL DE MINAS GERAIS';
+  if ((!issuerLayout.departmentName || !logoDataUri) && matchUnit.DEPARTAMENTO_ID_UNIDADES) {
     try {
       const [dRows]: any = await pool.query(
         'SELECT NOME_DEPARTAMENTOS, LOGO_URL_DEPARTAMENTOS FROM DEPARTAMENTOS WHERE ID_DEPARTAMENTOS = ? LIMIT 1',
         [matchUnit.DEPARTAMENTO_ID_UNIDADES]
       );
-      if (dRows?.[0]?.NOME_DEPARTAMENTOS) departmentName = String(dRows[0].NOME_DEPARTAMENTOS);
+      if (!issuerLayout.departmentName && dRows?.[0]?.NOME_DEPARTAMENTOS) {
+        departmentName = String(dRows[0].NOME_DEPARTAMENTOS);
+      }
       if (!logoDataUri && dRows?.[0]?.LOGO_URL_DEPARTAMENTOS) {
         logoDataUri = dRows[0].LOGO_URL_DEPARTAMENTOS;
       }
@@ -470,7 +507,8 @@ async function resolveUnitSelectionForUser(
       departmentName,
       fileSlug: sanitizeFileSlug(unidadeCodigoRaw || matchedName),
       unitIds: [matchedId],
-      logoDataUri
+      logoDataUri,
+      issuerUnitName: issuerLayout.issuerUnitName
     }
   };
 }
@@ -869,6 +907,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
           filtroTipoLabel: weaponSpec.pluralLabel,
           departamentoLabel: selection.departmentName,
           unidadeLabel: selection.displayName,
+          unidadeEmissoraLabel: selection.issuerUnitName,
           solicitacaoId,
           geradoEm,
           solicitanteNome: user.name,
@@ -1280,6 +1319,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
           modoRelatorio,
           departamentoLabel: selection.departmentName,
           unidadeLabel: selection.displayName,
+          unidadeEmissoraLabel: selection.issuerUnitName,
           solicitacaoId,
           geradoEm,
           solicitanteNome: user.name,
@@ -1656,6 +1696,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
           ? await generateSystemExplosivosPdf({
               departamentoLabel: selection.departmentName,
               unidadeLabel: selection.displayName,
+              unidadeEmissoraLabel: selection.issuerUnitName,
               solicitacaoId,
               geradoEm,
               solicitanteNome: user.name,
@@ -1666,6 +1707,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
           : await generateSystemMateriaisPdf({
               departamentoLabel: selection.departmentName,
               unidadeLabel: selection.displayName,
+              unidadeEmissoraLabel: selection.issuerUnitName,
               solicitacaoId,
               geradoEm,
               solicitanteNome: user.name,
@@ -2078,6 +2120,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         pdfBuffer = await generateSystemSinopseOperacionalPdf({
           departamentoLabel: selection.departmentName,
           unidadeLabel: selection.displayName,
+          unidadeEmissoraLabel: selection.issuerUnitName,
           isTodosUnidades: selection.isTodos,
           periodoLabel: periodFilter.label,
           solicitacaoId,
@@ -2501,6 +2544,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         pdfBuffer = await generateSystemSinopseTreinamentoPdf({
           departamentoLabel: selection.departmentName,
           unidadeLabel: selection.displayName,
+          unidadeEmissoraLabel: selection.issuerUnitName,
           isTodosUnidades: selection.isTodos,
           periodoLabel: periodFilter.label,
           solicitacaoId,
@@ -2906,6 +2950,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         anoReferencia,
         departamentoLabel: selection.departmentName,
         unidadeLabel: selection.displayName,
+        unidadeEmissoraLabel: selection.issuerUnitName,
         solicitacaoId,
         geradoEm,
         solicitanteNome: user.name,
@@ -3176,6 +3221,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         anoReferencia,
         departamentoLabel: selection.departmentName,
         unidadeLabel: selection.displayName,
+        unidadeEmissoraLabel: selection.issuerUnitName,
         solicitacaoId,
         geradoEm,
         solicitanteNome: user.name,
@@ -3411,6 +3457,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         anoReferencia,
         departamentoLabel: selection.departmentName,
         unidadeLabel: selection.displayName,
+        unidadeEmissoraLabel: selection.issuerUnitName,
         solicitacaoId,
         geradoEm,
         solicitanteNome: user.name,
@@ -5057,46 +5104,95 @@ async function queryDesempenhoResultadosYear(
       params.push(filter.unitId);
     }
 
-    const [rows]: any = await pool.query(
-      `SELECT
-         r.ID_RESULTADO as id,
-         r.ID_GRUPO as grupoId,
-         g.NOME_GRUPO as grupoNome,
-         r.ID_ATIVIDADE as atividadeId,
-         a.NOME as atividadeNome,
-         r.ID_MARCADOR as marcadorId,
-         r.MARCADOR_NOME as marcadorNome,
-         r.USUARIO_ID as usuarioId,
-         r.USUARIO_NOME as usuarioNome,
-         r.USUARIO_MASP as usuarioMasp,
-         r.USUARIO_UNIDADE_NOME as usuarioUnidadeNome,
-         r.CATEGORIA as categoria,
-         r.TIPO_MARCA as tipoMarca,
-         r.UNIDADE_MEDIDA as unidadeMedida,
-         r.DATA_AVALIACAO as dataAvaliacao,
-         r.HORA_AVALIACAO as horaAvaliacao,
-         r.VALOR_MARCA as valorMarca,
-         r.TEMPO_SEGUNDOS as tempoSegundos,
-         r.NOTA_OBTIDA as notaObtida,
-         r.NOTA_MIN_REF as notaMinRef,
-         r.NOTA_MAX_REF as notaMaxRef,
-         r.NOTA_APROVACAO_REF as notaAprovacaoRef,
-         r.TEMPO_APROVACAO_REF as tempoAprovacaoRef,
-         r.APROVADO as aprovado,
-         r.AUSENTE as ausente,
-         r.AUSENCIA_INFORMADA as ausenciaInformada,
-         r.TEVE_TIRO as teveTiro,
-         r.TIPO_ARMA as tipoArma,
-         r.TIROS_EFETUADOS as tirosEfetuados,
-         r.OBSERVACOES as observacoes,
-         r.DATA_CRIACAO as createdAt
-       FROM DESEMPENHO_RESULTADOS r
-       LEFT JOIN DESEMPENHO_ATIVIDADES a ON a.ID_ATIVIDADE = r.ID_ATIVIDADE
-       LEFT JOIN DESEMPENHO_GRUPOS g ON g.ID_GRUPO = r.ID_GRUPO
-       WHERE ${where.join(' AND ')}
-       ORDER BY r.DATA_AVALIACAO ASC, r.DATA_CRIACAO ASC`,
-      params
-    );
+    let rows: any[] = [];
+    try {
+      const [resRows]: any = await pool.query(
+        `SELECT
+           r.ID_RESULTADO as id,
+           r.ID_GRUPO as grupoId,
+           g.NOME_GRUPO as grupoNome,
+           r.ID_ATIVIDADE as atividadeId,
+           a.NOME as atividadeNome,
+           r.ID_MARCADOR as marcadorId,
+           r.MARCADOR_NOME as marcadorNome,
+           r.USUARIO_ID as usuarioId,
+           r.USUARIO_NOME as usuarioNome,
+           r.USUARIO_MASP as usuarioMasp,
+           r.USUARIO_UNIDADE_NOME as usuarioUnidadeNome,
+           r.CATEGORIA as categoria,
+           r.TIPO_MARCA as tipoMarca,
+           r.UNIDADE_MEDIDA as unidadeMedida,
+           r.DATA_AVALIACAO as dataAvaliacao,
+           r.HORA_AVALIACAO as horaAvaliacao,
+           r.VALOR_MARCA as valorMarca,
+           r.TEMPO_SEGUNDOS as tempoSegundos,
+           r.NOTA_OBTIDA as notaObtida,
+           r.NOTA_MIN_REF as notaMinRef,
+           r.NOTA_MAX_REF as notaMaxRef,
+           r.NOTA_APROVACAO_REF as notaAprovacaoRef,
+           r.TEMPO_APROVACAO_REF as tempoAprovacaoRef,
+           r.APROVADO as aprovado,
+           r.AUSENTE as ausente,
+           r.AUSENCIA_INFORMADA as ausenciaInformada,
+           r.TEVE_TIRO as teveTiro,
+           r.TIPO_ARMA as tipoArma,
+           r.TIROS_EFETUADOS as tirosEfetuados,
+           r.QUANTIDADE_TIROS_PONTUADOS_REF as quantidadeTirosPontuadosRef,
+           r.ACERTOS_TIROS as acertosTiros,
+           r.TAXA_ACERTO_POR_SEGUNDO as taxaAcertoPorSegundo,
+           r.OBSERVACOES as observacoes,
+           r.DATA_CRIACAO as createdAt
+         FROM DESEMPENHO_RESULTADOS r
+         LEFT JOIN DESEMPENHO_ATIVIDADES a ON a.ID_ATIVIDADE = r.ID_ATIVIDADE
+         LEFT JOIN DESEMPENHO_GRUPOS g ON g.ID_GRUPO = r.ID_GRUPO
+         WHERE ${where.join(' AND ')}
+         ORDER BY r.DATA_AVALIACAO ASC, r.DATA_CRIACAO ASC`,
+        params
+      );
+      rows = resRows || [];
+    } catch {
+      const [resRows]: any = await pool.query(
+        `SELECT
+           r.ID_RESULTADO as id,
+           r.ID_GRUPO as grupoId,
+           g.NOME_GRUPO as grupoNome,
+           r.ID_ATIVIDADE as atividadeId,
+           a.NOME as atividadeNome,
+           r.ID_MARCADOR as marcadorId,
+           r.MARCADOR_NOME as marcadorNome,
+           r.USUARIO_ID as usuarioId,
+           r.USUARIO_NOME as usuarioNome,
+           r.USUARIO_MASP as usuarioMasp,
+           r.USUARIO_UNIDADE_NOME as usuarioUnidadeNome,
+           r.CATEGORIA as categoria,
+           r.TIPO_MARCA as tipoMarca,
+           r.UNIDADE_MEDIDA as unidadeMedida,
+           r.DATA_AVALIACAO as dataAvaliacao,
+           r.HORA_AVALIACAO as horaAvaliacao,
+           r.VALOR_MARCA as valorMarca,
+           r.TEMPO_SEGUNDOS as tempoSegundos,
+           r.NOTA_OBTIDA as notaObtida,
+           r.NOTA_MIN_REF as notaMinRef,
+           r.NOTA_MAX_REF as notaMaxRef,
+           r.NOTA_APROVACAO_REF as notaAprovacaoRef,
+           r.TEMPO_APROVACAO_REF as tempoAprovacaoRef,
+           r.APROVADO as aprovado,
+           r.AUSENTE as ausente,
+           r.AUSENCIA_INFORMADA as ausenciaInformada,
+           r.TEVE_TIRO as teveTiro,
+           r.TIPO_ARMA as tipoArma,
+           r.TIROS_EFETUADOS as tirosEfetuados,
+           r.OBSERVACOES as observacoes,
+           r.DATA_CRIACAO as createdAt
+         FROM DESEMPENHO_RESULTADOS r
+         LEFT JOIN DESEMPENHO_ATIVIDADES a ON a.ID_ATIVIDADE = r.ID_ATIVIDADE
+         LEFT JOIN DESEMPENHO_GRUPOS g ON g.ID_GRUPO = r.ID_GRUPO
+         WHERE ${where.join(' AND ')}
+         ORDER BY r.DATA_AVALIACAO ASC, r.DATA_CRIACAO ASC`,
+        params
+      );
+      rows = resRows || [];
+    }
 
     return (rows || []).map((r: any) => ({
       id: String(r.id),
@@ -5126,6 +5222,15 @@ async function queryDesempenhoResultadosYear(
       teveTiro: Boolean(r.teveTiro),
       tipoArma: r.tipoArma || null,
       tirosEfetuados: r.tirosEfetuados !== null && r.tirosEfetuados !== undefined ? Number(r.tirosEfetuados) : null,
+      quantidadeTirosPontuadosRef:
+        r.quantidadeTirosPontuadosRef !== null && r.quantidadeTirosPontuadosRef !== undefined
+          ? Number(r.quantidadeTirosPontuadosRef)
+          : null,
+      acertosTiros: r.acertosTiros !== null && r.acertosTiros !== undefined ? Number(r.acertosTiros) : null,
+      taxaAcertoPorSegundo:
+        r.taxaAcertoPorSegundo !== null && r.taxaAcertoPorSegundo !== undefined
+          ? Number(r.taxaAcertoPorSegundo)
+          : null,
       observacoes: r.observacoes || null,
       createdAt: r.createdAt ? String(r.createdAt) : null,
       // metadata temporária usada apenas no agrupamento interno por usuário
@@ -5239,7 +5344,8 @@ async function queryDesempenhoUnidadeResumoYear(
                 TEMPO_APROVACAO_MODO as tempoAprovacaoModo,
                 NOTA_MIN as notaMin, NOTA_MAX as notaMax, NOTA_APROVACAO as notaAprovacao,
                 DIFICULDADE as dificuldade, TEVE_TIRO as teveTiro, TIPO_ARMA as tipoArma,
-                QUANTIDADE_TIROS as quantidadeTiros, DESCRICAO as descricao
+                QUANTIDADE_TIROS as quantidadeTiros, QUANTIDADE_TIROS_PONTUADOS as quantidadeTirosPontuados,
+                DESCRICAO as descricao
          FROM DESEMPENHO_MARCADORES
          WHERE CATEGORIA = ? AND ATIVO = 1 AND (UNIDADE_ID = ? OR UNIDADE_ID IS NULL OR UNIDADE_ID = '')
          ORDER BY NOME ASC`,
@@ -5281,6 +5387,10 @@ async function queryDesempenhoUnidadeResumoYear(
       tipoArma: m.tipoArma || null,
       quantidadeTiros:
         m.quantidadeTiros !== null && m.quantidadeTiros !== undefined ? Number(m.quantidadeTiros) : null,
+      quantidadeTirosPontuados:
+        m.quantidadeTirosPontuados !== null && m.quantidadeTirosPontuados !== undefined
+          ? Number(m.quantidadeTirosPontuados)
+          : null,
       descricao: m.descricao || null,
       totalAvaliacoesAno: countByMarcador.get(String(m.id)) || 0
     }));
