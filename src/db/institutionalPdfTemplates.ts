@@ -4269,4 +4269,2082 @@ export async function generateSystemSinopseTreinamentoPdf(params: {
   return Buffer.from(pdfBytes);
 }
 
+// ============================================================================
+// FICHA DE DESEMPENHO INDIVIDUAL, DA UNIDADE E DO K9 (PDF VETORIAL INSTITUCIONAL)
+// ============================================================================
+export type DesempenhoCategoriaPdf = 'FISICO' | 'TATICO';
+
+export interface SystemDesempenhoResultadoPdf {
+  id: string;
+  grupoId: string;
+  grupoNome: string;
+  atividadeId: string;
+  atividadeNome: string;
+  marcadorId: string;
+  marcadorNome: string;
+  categoria: DesempenhoCategoriaPdf;
+  tipoMarca?: string | null;
+  unidadeMedida?: string | null;
+  dataAvaliacao: string; // YYYY-MM-DD
+  horaAvaliacao?: string | null;
+  valorMarca?: number | null;
+  tempoSegundos?: number | null;
+  notaObtida: number;
+  notaMinRef: number;
+  notaMaxRef: number;
+  notaAprovacaoRef: number;
+  tempoAprovacaoRef?: number | null;
+  aprovado: boolean;
+  ausente: boolean;
+  ausenciaInformada?: boolean | null;
+  teveTiro: boolean;
+  tipoArma?: string | null;
+  tirosEfetuados?: number | null;
+  observacoes?: string | null;
+  createdAt?: string | null;
+}
+
+export interface SystemDesempenhoUsuarioPdf {
+  id: string;
+  name: string;
+  masp: string;
+  cargo?: string | null;
+  unidadeNome: string;
+  fotoUrl?: string | null;
+  resultados: SystemDesempenhoResultadoPdf[];
+}
+
+export interface SystemDesempenhoMarcadorPdf {
+  id: string;
+  nome: string;
+  categoria: DesempenhoCategoriaPdf;
+  tipoMarca?: string | null;
+  unidadeMedida?: string | null;
+  usaTempo: boolean;
+  tempoAprovacaoSeg?: number | null;
+  notaMin: number;
+  notaMax: number;
+  notaAprovacao: number;
+  dificuldade?: string | null;
+  teveTiro: boolean;
+  tipoArma?: string | null;
+  quantidadeTiros?: number | null;
+  descricao?: string | null;
+  totalAvaliacoesAno: number;
+}
+
+export interface SystemDesempenhoAtividadePdf {
+  id: string;
+  nome: string;
+  categoria: DesempenhoCategoriaPdf;
+  dataAtividade: string; // YYYY-MM-DD
+  horaAtividade?: string | null;
+  descricao?: string | null;
+  marcadoresNomes: string[];
+  totalAvaliacoesAno: number;
+}
+
+export interface SystemFichaIndividualPdfParams {
+  categoria: DesempenhoCategoriaPdf;
+  anoReferencia: number;
+  departamentoLabel: string;
+  unidadeLabel: string;
+  solicitacaoId: string;
+  geradoEm: Date;
+  solicitanteNome: string;
+  solicitanteMasp?: string | null;
+  logoDataUri?: string | null;
+  usuario: SystemDesempenhoUsuarioPdf;
+}
+
+export interface SystemFichaUnidadePdfParams {
+  categoria: DesempenhoCategoriaPdf;
+  anoReferencia: number;
+  departamentoLabel: string;
+  unidadeLabel: string;
+  solicitacaoId: string;
+  geradoEm: Date;
+  solicitanteNome: string;
+  solicitanteMasp?: string | null;
+  logoDataUri?: string | null;
+  marcadores: SystemDesempenhoMarcadorPdf[];
+  atividades: SystemDesempenhoAtividadePdf[];
+  usuarios: SystemDesempenhoUsuarioPdf[];
+}
+
+export interface SystemK9TopicBarPdf {
+  topico: string;
+  count: number;
+  pctOfTrainings: number;
+}
+
+export interface SystemK9VacinaPdf {
+  nomeVacina: string;
+  dataAplicacao?: string | null;
+  proximaDose?: string | null;
+  lote?: string | null;
+  veterinario?: string | null;
+}
+
+export interface SystemK9MedicoPdf {
+  dataAtendimento?: string | null;
+  tipoAtendimento: string;
+  diagnostico?: string | null;
+  conduta?: string | null;
+  veterinario?: string | null;
+}
+
+export interface SystemK9MedicamentoPdf {
+  produtoNome: string;
+  dataHora?: string | null;
+  quantidade: number;
+  unidadeMedida?: string | null;
+  dosagemAplicada?: string | null;
+  frequenciaAdministrada?: string | null;
+  motivo?: string | null;
+  responsavelAplicacaoNome?: string | null;
+}
+
+export interface SystemK9AnimalPdf {
+  id: string;
+  nome: string;
+  raca: string;
+  sexo?: string | null;
+  dataNascimento?: string | null;
+  microchip?: string | null;
+  pelagem?: string | null;
+  especialidade?: string | null;
+  baiaBox: string;
+  status: string;
+  condutorTexto: string;
+  fotoUrl?: string | null;
+  anotacoesCondutor?: string | null;
+  anotacoesCondutorUpdatedAt?: string | null;
+  totalTreinosAno: number;
+  bars: SystemK9TopicBarPdf[];
+  maxCount: number;
+  minCount: number;
+  aptidaoTopicos: string[];
+  sugestaoTopicos: string[];
+  vacinas: SystemK9VacinaPdf[];
+  ultimoMedico?: SystemK9MedicoPdf | null;
+  ultimoMedicamento?: SystemK9MedicamentoPdf | null;
+}
+
+export interface SystemFichaK9PdfParams {
+  mode: 'condutor' | 'unidade';
+  anoReferencia: number;
+  departamentoLabel: string;
+  unidadeLabel: string;
+  solicitacaoId: string;
+  geradoEm: Date;
+  solicitanteNome: string;
+  solicitanteMasp?: string | null;
+  logoDataUri?: string | null;
+  animais: SystemK9AnimalPdf[];
+}
+
+async function tryEmbedPhotoDataUri(doc: PDFDocument, dataUri?: string | null): Promise<PDFImage | null> {
+  if (!dataUri || typeof dataUri !== 'string') return null;
+  const match = dataUri.trim().match(/^data:image\/(png|jpeg|jpg);base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!match) return null;
+  try {
+    const kind = match[1].toLowerCase();
+    const bytes = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
+    if (bytes.length === 0 || bytes.length > 4 * 1024 * 1024) return null;
+    if (kind === 'png') return await doc.embedPng(bytes);
+    return await doc.embedJpg(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function fmtIsoDateBrPdf(iso?: string | null): string {
+  if (!iso) return '-';
+  const clean = String(iso).slice(0, 10);
+  const parts = clean.split('-');
+  if (parts.length !== 3) return sanitizePdfText(clean) || '-';
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
+function fmtDateTimeStrBrPdf(dt?: string | null): string {
+  if (!dt) return '-';
+  const str = String(dt).trim();
+  if (str.length >= 16 && str.includes('-')) {
+    return `${fmtIsoDateBrPdf(str.slice(0, 10))} ${str.slice(11, 16)}`;
+  }
+  return fmtIsoDateBrPdf(str);
+}
+
+function fmtSecondsHumanPdf(seconds?: number | null): string {
+  if (seconds === undefined || seconds === null || !Number.isFinite(seconds)) return '-';
+  const s = Math.max(0, Math.round(seconds));
+  const mins = Math.floor(s / 60);
+  const rem = s % 60;
+  if (mins === 0) return `${rem}s`;
+  if (rem === 0) return mins === 1 ? '1 minuto' : `${mins} minutos`;
+  return `${mins}m ${String(rem).padStart(2, '0')}s`;
+}
+
+function fmtSecondsCompactPdf(seconds?: number | null): string {
+  if (seconds === undefined || seconds === null || !Number.isFinite(seconds)) return '-';
+  const s = Math.max(0, Math.round(seconds));
+  const mins = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+}
+
+function fmtNumBrPdf(val?: number | null): string {
+  if (val === undefined || val === null || !Number.isFinite(val)) return '-';
+  return Number.isInteger(val) ? String(val) : val.toFixed(2).replace('.', ',').replace(/,00$/, '');
+}
+
+function calcDesempenhoPct(nota: number, maxRef: number): number {
+  if (!maxRef || maxRef <= 0) return 0;
+  return Math.max(0, Math.min(100, (nota / maxRef) * 100));
+}
+
+function formatResultadoResumoPdf(r: SystemDesempenhoResultadoPdf): string {
+  if (r.ausente) {
+    if (r.ausenciaInformada === true) return 'Ausente (Informada previamente)';
+    if (r.ausenciaInformada === false) return 'Ausente (Nao informada)';
+    return 'Ausente';
+  }
+  const parts: string[] = [];
+  if (r.valorMarca !== undefined && r.valorMarca !== null) {
+    const unitLabel = r.unidadeMedida || (r.tipoMarca === 'Distância' ? 'm' : r.tipoMarca === 'Repetição' ? 'rep.' : 'exec.');
+    parts.push(`${fmtNumBrPdf(r.valorMarca)} ${unitLabel}`);
+  }
+  if (r.tempoSegundos !== undefined && r.tempoSegundos !== null) {
+    parts.push(`em ${fmtSecondsHumanPdf(r.tempoSegundos)}`);
+  }
+  const left = parts.join(' ');
+  const pts = `${fmtNumBrPdf(r.notaObtida)} pts`;
+  const shotPart = r.teveTiro && r.tipoArma ? ` - ${r.tirosEfetuados ?? 0} tiros (${r.tipoArma})` : '';
+  return left ? `${left} - ${pts}${shotPart}` : `${pts}${shotPart}`;
+}
+
+interface ComputedMarkerSummaryPdf {
+  marcadorId: string;
+  marcadorNome: string;
+  categoria: DesempenhoCategoriaPdf;
+  tipoMarca?: string | null;
+  latest: SystemDesempenhoResultadoPdf;
+  best: SystemDesempenhoResultadoPdf;
+  attempts: number;
+  latestPct: number;
+  approvalPct: number;
+  trendDeltaPct: number | null;
+}
+
+interface ComputedEvolutionPtPdf {
+  label: string;
+  valuePct: number;
+  aprovado: boolean;
+}
+
+function computeUserPerformanceStats(resultados: SystemDesempenhoResultadoPdf[]) {
+  const sorted = [...resultados].sort((a, b) => {
+    const cmp = String(a.dataAvaliacao || '').localeCompare(String(b.dataAvaliacao || ''));
+    if (cmp !== 0) return cmp;
+    return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+  });
+
+  const byMarker = new Map<string, SystemDesempenhoResultadoPdf[]>();
+  for (const r of sorted) {
+    const key = r.marcadorId || r.marcadorNome;
+    const arr = byMarker.get(key) || [];
+    arr.push(r);
+    byMarker.set(key, arr);
+  }
+
+  const markerSummaries: ComputedMarkerSummaryPdf[] = [];
+  for (const [marcadorId, items] of byMarker.entries()) {
+    const latest = items[items.length - 1];
+    const first = items[0];
+    const best = items.reduce((acc, cur) =>
+      calcDesempenhoPct(cur.notaObtida, cur.notaMaxRef) > calcDesempenhoPct(acc.notaObtida, acc.notaMaxRef)
+        ? cur
+        : acc
+    );
+    const latestPct = latest.ausente ? 0 : calcDesempenhoPct(latest.notaObtida, latest.notaMaxRef);
+    const firstPct = first.ausente ? 0 : calcDesempenhoPct(first.notaObtida, first.notaMaxRef);
+    const approvalPct = calcDesempenhoPct(latest.notaAprovacaoRef, latest.notaMaxRef);
+    markerSummaries.push({
+      marcadorId,
+      marcadorNome: latest.marcadorNome,
+      categoria: latest.categoria,
+      tipoMarca: latest.tipoMarca,
+      latest,
+      best,
+      attempts: items.length,
+      latestPct,
+      approvalPct,
+      trendDeltaPct: items.length > 1 ? latestPct - firstPct : null
+    });
+  }
+  markerSummaries.sort((a, b) => b.latestPct - a.latestPct);
+
+  const total = sorted.length;
+  const ausencias = sorted.filter(r => r.ausente).length;
+  const presentes = sorted.filter(r => !r.ausente);
+  const aprovados = presentes.filter(r => r.aprovado).length;
+  const taxaAprovacao = presentes.length > 0 ? Math.round((aprovados / presentes.length) * 100) : 0;
+  const mediaPct =
+    presentes.length > 0
+      ? Math.round(presentes.reduce((s, r) => s + calcDesempenhoPct(r.notaObtida, r.notaMaxRef), 0) / presentes.length)
+      : 0;
+  const totalTiros = presentes.reduce((s, r) => s + Number(r.tirosEfetuados || 0), 0);
+
+  // Curva de evolução por sessão (dataAvaliacao + grupoId)
+  const bySession = new Map<string, SystemDesempenhoResultadoPdf[]>();
+  for (const r of sorted) {
+    const skey = `${r.dataAvaliacao}__${r.grupoId || r.atividadeId || r.id}`;
+    const arr = bySession.get(skey) || [];
+    arr.push(r);
+    bySession.set(skey, arr);
+  }
+  const evolution: ComputedEvolutionPtPdf[] = Array.from(bySession.values())
+    .sort((a, b) => String(a[0].dataAvaliacao).localeCompare(String(b[0].dataAvaliacao)))
+    .map(items => {
+      const avgPct =
+        items.reduce((s, x) => s + (x.ausente ? 0 : calcDesempenhoPct(x.notaObtida, x.notaMaxRef)), 0) / items.length;
+      const allAppr = items.every(x => !x.ausente && x.aprovado);
+      return {
+        label: fmtIsoDateBrPdf(items[0].dataAvaliacao).slice(0, 5),
+        valuePct: Math.round(avgPct * 10) / 10,
+        aprovado: allAppr
+      };
+    });
+
+  const evolutionDelta =
+    evolution.length >= 2
+      ? Math.round((evolution[evolution.length - 1].valuePct - evolution[0].valuePct) * 10) / 10
+      : null;
+
+  return {
+    sorted,
+    markerSummaries,
+    kpis: { total, ausencias, presentesCount: presentes.length, aprovados, taxaAprovacao, mediaPct, totalTiros },
+    bestMarker: markerSummaries.length > 0 ? markerSummaries[0] : null,
+    lowestMarker: markerSummaries.length > 1 ? markerSummaries[markerSummaries.length - 1] : null,
+    evolution,
+    evolutionDelta
+  };
+}
+
+function drawEvolutionCurveChart(opts: {
+  page: PDFPage;
+  x: number;
+  yTop: number;
+  width: number;
+  height: number;
+  points: ComputedEvolutionPtPdf[];
+  evolutionDelta: number | null;
+  categoriaLabel: string;
+  anoReferencia: number;
+  fontRegular: PDFFont;
+  fontBold: PDFFont;
+}): number {
+  const { page, x, yTop, width, height, points, evolutionDelta, categoriaLabel, anoReferencia, fontRegular, fontBold } = opts;
+  const yBottom = yTop - height;
+
+  // Moldura do gráfico
+  page.drawRectangle({
+    x,
+    y: yBottom,
+    width,
+    height,
+    color: PCMG_COLORS.white,
+    borderColor: PCMG_COLORS.slate300,
+    borderWidth: 0.75
+  });
+
+  // Cabeçalho do card do gráfico
+  const titleText = sanitizePdfText(`CURVA DE EVOLUCAO - ${categoriaLabel} (${anoReferencia})`);
+  page.drawText(titleText, {
+    x: x + 8,
+    y: yTop - 13,
+    size: 7.5,
+    font: fontBold,
+    color: PCMG_COLORS.ink
+  });
+
+  if (evolutionDelta !== null) {
+    const deltaStr = `Variacao: ${evolutionDelta >= 0 ? '+' : ''}${evolutionDelta}%`;
+    const deltaW = fontBold.widthOfTextAtSize(deltaStr, 7);
+    page.drawText(deltaStr, {
+      x: x + width - deltaW - 8,
+      y: yTop - 13,
+      size: 7,
+      font: fontBold,
+      color: evolutionDelta >= 0 ? PCMG_COLORS.emerald700 : PCMG_COLORS.redText
+    });
+  }
+
+  const padL = 28;
+  const padR = 14;
+  const padT = 22;
+  const padB = 20;
+  const plotX = x + padL;
+  const plotW = width - padL - padR;
+  const plotYBottom = yBottom + padB;
+  const plotH = height - padT - padB;
+
+  // Grade horizontal 0, 25, 50, 75, 100%
+  for (const pct of [0, 25, 50, 75, 100]) {
+    const gy = plotYBottom + (pct / 100) * plotH;
+    page.drawLine({
+      start: { x: plotX, y: gy },
+      end: { x: plotX + plotW, y: gy },
+      thickness: pct === 0 ? 0.8 : 0.45,
+      color: pct === 0 ? PCMG_COLORS.slate400 : PCMG_COLORS.slate200
+    });
+    const tickTxt = `${pct}%`;
+    const tw = fontRegular.widthOfTextAtSize(tickTxt, 6.2);
+    page.drawText(tickTxt, {
+      x: plotX - tw - 4,
+      y: gy - 2,
+      size: 6.2,
+      font: fontRegular,
+      color: PCMG_COLORS.slate500
+    });
+  }
+
+  if (points.length === 0) {
+    const emptyTxt = 'Sem avaliacoes suficientes para gerar a curva de evolucao neste ano.';
+    const ew = fontRegular.widthOfTextAtSize(emptyTxt, 7.5);
+    page.drawText(emptyTxt, {
+      x: plotX + Math.max(0, (plotW - ew) / 2),
+      y: plotYBottom + plotH / 2 - 3,
+      size: 7.5,
+      font: fontRegular,
+      color: PCMG_COLORS.slate500
+    });
+    return yBottom;
+  }
+
+  // Limita rótulos no eixo X se houver muitos pontos
+  const maxPts = points.slice(-18);
+  const coords = maxPts.map((pt, idx) => {
+    const px =
+      maxPts.length === 1
+        ? plotX + plotW / 2
+        : plotX + (idx / (maxPts.length - 1)) * plotW;
+    const py = plotYBottom + (Math.max(0, Math.min(100, pt.valuePct)) / 100) * plotH;
+    return { ...pt, px, py };
+  });
+
+  // Segmentos de linha
+  for (let i = 0; i < coords.length - 1; i++) {
+    page.drawLine({
+      start: { x: coords[i].px, y: coords[i].py },
+      end: { x: coords[i + 1].px, y: coords[i + 1].py },
+      thickness: 1.6,
+      color: PCMG_COLORS.emerald700
+    });
+  }
+
+  const labelStep = coords.length > 10 ? Math.ceil(coords.length / 8) : 1;
+  coords.forEach((pt, idx) => {
+    const dotColor = pt.aprovado ? PCMG_COLORS.emerald700 : PCMG_COLORS.amber600;
+    page.drawCircle({
+      x: pt.px,
+      y: pt.py,
+      size: 3.1,
+      color: dotColor,
+      borderColor: PCMG_COLORS.white,
+      borderWidth: 0.8
+    });
+
+    if (idx % labelStep === 0 || idx === coords.length - 1) {
+      const valTxt = `${Math.round(pt.valuePct)}%`;
+      const vw = fontBold.widthOfTextAtSize(valTxt, 6.2);
+      const valY = pt.py + 5 <= yTop - 16 ? pt.py + 5 : pt.py - 9;
+      page.drawText(valTxt, {
+        x: Math.max(plotX, Math.min(plotX + plotW - vw, pt.px - vw / 2)),
+        y: valY,
+        size: 6.2,
+        font: fontBold,
+        color: PCMG_COLORS.ink
+      });
+
+      const dtW = fontRegular.widthOfTextAtSize(pt.label, 6);
+      page.drawText(pt.label, {
+        x: Math.max(plotX - 4, Math.min(plotX + plotW - dtW + 4, pt.px - dtW / 2)),
+        y: plotYBottom - 11,
+        size: 6,
+        font: fontRegular,
+        color: PCMG_COLORS.slate600
+      });
+    }
+  });
+
+  return yBottom;
+}
+
+async function renderSingleUserPerformancePage(opts: {
+  doc: PDFDocument;
+  page: PDFPage;
+  pageWidth: number;
+  pageHeight: number;
+  marginX: number;
+  fontRegular: PDFFont;
+  fontBold: PDFFont;
+  fontMono: PDFFont;
+  fontMonoBold: PDFFont;
+  logoImage: PDFImage | null;
+  docCode: string;
+  emissaoBr: string;
+  categoria: DesempenhoCategoriaPdf;
+  anoReferencia: number;
+  departamentoLabel: string;
+  unidadeLabel: string;
+  solicitanteNome: string;
+  usuario: SystemDesempenhoUsuarioPdf;
+  singlePageStrict: boolean;
+}): Promise<void> {
+  const {
+    doc,
+    pageWidth,
+    pageHeight,
+    marginX,
+    fontRegular,
+    fontBold,
+    fontMono,
+    fontMonoBold,
+    logoImage,
+    docCode,
+    emissaoBr,
+    categoria,
+    anoReferencia,
+    departamentoLabel,
+    unidadeLabel,
+    solicitanteNome,
+    usuario,
+    singlePageStrict
+  } = opts;
+  let page = opts.page;
+  const contentWidth = pageWidth - marginX * 2;
+  const catTitle = categoria === 'FISICO' ? 'TREINAMENTO FISICO' : 'TREINAMENTO TECNICO / TATICO (OPERACIONAL)';
+  const catShort = categoria === 'FISICO' ? 'Fisico' : 'Operacional / Tatico';
+  const stats = computeUserPerformanceStats(usuario.resultados);
+
+  const drawPageTopHeader = (p: PDFPage): number => {
+    let curY = drawTopUniqueCodeBar(p, pageWidth, pageHeight, marginX, fontMono, fontMonoBold, docCode, emissaoBr);
+    curY -= 4;
+
+    const headerH = 44;
+    const headerTop = curY;
+    let textStartX = marginX;
+    if (logoImage) {
+      const dims = logoImage.scaleToFit(36, 36);
+      p.drawImage(logoImage, {
+        x: marginX,
+        y: headerTop - dims.height - 2,
+        width: dims.width,
+        height: dims.height
+      });
+      textStartX = marginX + dims.width + 9;
+    }
+
+    p.drawText('POLICIA CIVIL DE MINAS GERAIS', {
+      x: textStartX,
+      y: headerTop - 9,
+      size: 7.5,
+      font: fontBold,
+      color: PCMG_COLORS.slate600
+    });
+    p.drawText(
+      fitTextToWidth(`FICHA DE INDICES DE DESEMPENHO - ${catTitle}`, fontBold, 10.5, contentWidth - (textStartX - marginX) - 135),
+      {
+        x: textStartX,
+        y: headerTop - 21,
+        size: 10.5,
+        font: fontBold,
+        color: PCMG_COLORS.ink
+      }
+    );
+    p.drawText(
+      fitTextToWidth(`${unidadeLabel} - ${departamentoLabel} | Ano ${anoReferencia}`, fontRegular, 7.5, contentWidth - (textStartX - marginX) - 135),
+      {
+        x: textStartX,
+        y: headerTop - 32,
+        size: 7.5,
+        font: fontRegular,
+        color: PCMG_COLORS.slate600
+      }
+    );
+
+    const rightLines = [
+      `Emitido em: ${emissaoBr.slice(0, 16)}`,
+      `Emissor: ${fitTextToWidth(solicitanteNome, fontRegular, 7, 115)}`,
+      `Periodo: Ano ${anoReferencia}`
+    ];
+    let ry = headerTop - 10;
+    for (const rl of rightLines) {
+      const rw = fontRegular.widthOfTextAtSize(rl, 7);
+      p.drawText(rl, {
+        x: pageWidth - marginX - rw,
+        y: ry,
+        size: 7,
+        font: fontRegular,
+        color: PCMG_COLORS.slate600
+      });
+      ry -= 10;
+    }
+
+    const lineY = headerTop - headerH;
+    p.drawLine({
+      start: { x: marginX, y: lineY },
+      end: { x: pageWidth - marginX, y: lineY },
+      thickness: 1.6,
+      color: PCMG_COLORS.ink
+    });
+    return lineY - 8;
+  };
+
+  let y = drawPageTopHeader(page);
+
+  // Card de Perfil do Policial (com Foto 3x4 + Dados + KPIs)
+  const profileH = 74;
+  const profileBottom = y - profileH;
+  page.drawRectangle({
+    x: marginX,
+    y: profileBottom,
+    width: contentWidth,
+    height: profileH,
+    color: PCMG_COLORS.slate50,
+    borderColor: PCMG_COLORS.slate300,
+    borderWidth: 0.8
+  });
+
+  // Foto 3x4
+  const photoW = 46;
+  const photoH = 60;
+  const photoX = marginX + 8;
+  const photoY = profileBottom + 7;
+  const userPhoto = await tryEmbedPhotoDataUri(doc, usuario.fotoUrl);
+  page.drawRectangle({
+    x: photoX,
+    y: photoY,
+    width: photoW,
+    height: photoH,
+    color: PCMG_COLORS.slate200,
+    borderColor: PCMG_COLORS.slate400,
+    borderWidth: 0.8
+  });
+  if (userPhoto) {
+    const dims = userPhoto.scaleToFit(photoW - 2, photoH - 2);
+    page.drawImage(userPhoto, {
+      x: photoX + (photoW - dims.width) / 2,
+      y: photoY + (photoH - dims.height) / 2,
+      width: dims.width,
+      height: dims.height
+    });
+  } else {
+    const initials = sanitizePdfText(usuario.name)
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(w => w[0]?.toUpperCase() || '')
+      .join('') || 'PC';
+    const iw = fontBold.widthOfTextAtSize(initials, 13);
+    page.drawText(initials, {
+      x: photoX + (photoW - iw) / 2,
+      y: photoY + photoH / 2 + 2,
+      size: 13,
+      font: fontBold,
+      color: PCMG_COLORS.slate600
+    });
+    const fLbl = 'FOTO 3x4';
+    const fw = fontBold.widthOfTextAtSize(fLbl, 6);
+    page.drawText(fLbl, {
+      x: photoX + (photoW - fw) / 2,
+      y: photoY + 12,
+      size: 6,
+      font: fontBold,
+      color: PCMG_COLORS.slate500
+    });
+  }
+
+  // Dados principais do policial
+  const infoX = photoX + photoW + 10;
+  const infoW = contentWidth - (photoW + 26);
+  const colW4 = infoW / 4;
+
+  const drawInfoCell = (cx: number, cy: number, label: string, val: string, maxW: number, valColor = PCMG_COLORS.ink, valSize = 8.5) => {
+    page.drawText(label, { x: cx, y: cy, size: 6.2, font: fontBold, color: PCMG_COLORS.slate500 });
+    page.drawText(fitTextToWidth(val, fontBold, valSize, maxW), {
+      x: cx,
+      y: cy - 10,
+      size: valSize,
+      font: fontBold,
+      color: valColor
+    });
+  };
+
+  drawInfoCell(infoX, y - 14, 'POLICIAL', usuario.name, colW4 * 1.6 - 6, PCMG_COLORS.ink, 9.2);
+  drawInfoCell(infoX + colW4 * 1.6, y - 14, 'MASP', formatMaspBr(usuario.masp), colW4 * 0.7 - 4, PCMG_COLORS.ink, 8.5);
+  drawInfoCell(infoX + colW4 * 2.3, y - 14, 'CARGO', usuario.cargo || 'Policial Civil', colW4 * 0.9 - 4, PCMG_COLORS.ink, 8);
+  drawInfoCell(
+    infoX + colW4 * 3.2,
+    y - 14,
+    'APROVEIT. / APROV.',
+    `${stats.kpis.mediaPct}% - ${stats.kpis.taxaAprovacao}%`,
+    colW4 * 0.8,
+    PCMG_COLORS.emerald700,
+    8.5
+  );
+
+  // Faixa de KPIs internos do card
+  const kpiY = profileBottom + 10;
+  const kpiItems =
+    categoria === 'TATICO'
+      ? [
+          { lbl: 'AVALIACOES', val: `${stats.kpis.total}` },
+          { lbl: 'APROVEIT. MEDIO', val: `${stats.kpis.mediaPct}%` },
+          { lbl: 'TAXA APROVACAO', val: `${stats.kpis.taxaAprovacao}% (${stats.kpis.aprovados}/${stats.kpis.presentesCount})` },
+          { lbl: 'MARCADORES', val: `${stats.markerSummaries.length}` },
+          { lbl: 'DISPAROS TATICOS', val: `${stats.kpis.totalTiros}` }
+        ]
+      : [
+          { lbl: 'AVALIACOES', val: `${stats.kpis.total}` },
+          { lbl: 'APROVEIT. MEDIO', val: `${stats.kpis.mediaPct}%` },
+          { lbl: 'TAXA APROVACAO', val: `${stats.kpis.taxaAprovacao}% (${stats.kpis.aprovados}/${stats.kpis.presentesCount})` },
+          { lbl: 'MARCADORES', val: `${stats.markerSummaries.length}` },
+          { lbl: 'AUSENCIAS', val: `${stats.kpis.ausencias}` }
+        ];
+  const kpiBoxW = (infoW - (kpiItems.length - 1) * 5) / kpiItems.length;
+  kpiItems.forEach((k, idx) => {
+    const kx = infoX + idx * (kpiBoxW + 5);
+    page.drawRectangle({
+      x: kx,
+      y: kpiY,
+      width: kpiBoxW,
+      height: 28,
+      color: PCMG_COLORS.white,
+      borderColor: PCMG_COLORS.slate200,
+      borderWidth: 0.6
+    });
+    page.drawText(k.lbl, { x: kx + 4, y: kpiY + 19, size: 5.5, font: fontBold, color: PCMG_COLORS.slate500 });
+    page.drawText(fitTextToWidth(k.val, fontBold, 8, kpiBoxW - 8), {
+      x: kx + 4,
+      y: kpiY + 7,
+      size: 8,
+      font: fontBold,
+      color: PCMG_COLORS.ink
+    });
+  });
+
+  y = profileBottom - 8;
+
+  // Sem avaliações no ano
+  if (stats.sorted.length === 0) {
+    const emptyBoxH = 62;
+    page.drawRectangle({
+      x: marginX,
+      y: y - emptyBoxH,
+      width: contentWidth,
+      height: emptyBoxH,
+      color: PCMG_COLORS.slate50,
+      borderColor: PCMG_COLORS.slate300,
+      borderWidth: 0.75
+    });
+    const msg1 = `Nenhuma avaliacao de ${catShort.toLowerCase()} registrada no ano ${anoReferencia} para este policial.`;
+    const w1 = fontBold.widthOfTextAtSize(msg1, 9);
+    page.drawText(msg1, {
+      x: marginX + Math.max(8, (contentWidth - w1) / 2),
+      y: y - 28,
+      size: 9,
+      font: fontBold,
+      color: PCMG_COLORS.slate600
+    });
+    const msg2 = 'Quando houver lancamentos salvos na unidade, os graficos e indices aparecerao automaticamente aqui.';
+    const w2 = fontRegular.widthOfTextAtSize(msg2, 7.5);
+    page.drawText(msg2, {
+      x: marginX + Math.max(8, (contentWidth - w2) / 2),
+      y: y - 43,
+      size: 7.5,
+      font: fontRegular,
+      color: PCMG_COLORS.slate500
+    });
+    return;
+  }
+
+  // Destaques (Maior Índice & Ponto de Atenção)
+  if (stats.bestMarker) {
+    const highH = 34;
+    const halfW = (contentWidth - 8) / 2;
+    page.drawRectangle({
+      x: marginX,
+      y: y - highH,
+      width: stats.lowestMarker ? halfW : contentWidth,
+      height: highH,
+      color: PCMG_COLORS.emeraldBg,
+      borderColor: PCMG_COLORS.emeraldBorder,
+      borderWidth: 0.7
+    });
+    page.drawText('MAIOR INDICE / DESTAQUE DE DESEMPENHO', {
+      x: marginX + 7,
+      y: y - 10,
+      size: 6.2,
+      font: fontBold,
+      color: PCMG_COLORS.emerald700
+    });
+    page.drawText(
+      fitTextToWidth(
+        `${stats.bestMarker.marcadorNome} (${Math.round(stats.bestMarker.latestPct)}%)`,
+        fontBold,
+        8,
+        (stats.lowestMarker ? halfW : contentWidth) - 14
+      ),
+      { x: marginX + 7, y: y - 20, size: 8, font: fontBold, color: PCMG_COLORS.emeraldText }
+    );
+    page.drawText(
+      fitTextToWidth(
+        `Ultima marca: ${formatResultadoResumoPdf(stats.bestMarker.latest)}`,
+        fontRegular,
+        6.5,
+        (stats.lowestMarker ? halfW : contentWidth) - 14
+      ),
+      { x: marginX + 7, y: y - 29, size: 6.5, font: fontRegular, color: PCMG_COLORS.emeraldText }
+    );
+
+    if (stats.lowestMarker) {
+      const rx = marginX + halfW + 8;
+      page.drawRectangle({
+        x: rx,
+        y: y - highH,
+        width: halfW,
+        height: highH,
+        color: PCMG_COLORS.amberBg,
+        borderColor: PCMG_COLORS.amberBorder,
+        borderWidth: 0.7
+      });
+      page.drawText('PONTO DE ATENCAO / SUGESTAO DE TREINAMENTO', {
+        x: rx + 7,
+        y: y - 10,
+        size: 6.2,
+        font: fontBold,
+        color: PCMG_COLORS.amber700
+      });
+      page.drawText(
+        fitTextToWidth(`${stats.lowestMarker.marcadorNome} (${Math.round(stats.lowestMarker.latestPct)}%)`, fontBold, 8, halfW - 14),
+        { x: rx + 7, y: y - 20, size: 8, font: fontBold, color: PCMG_COLORS.amberText }
+      );
+      page.drawText(
+        fitTextToWidth(`Ultima marca: ${formatResultadoResumoPdf(stats.lowestMarker.latest)}`, fontRegular, 6.5, halfW - 14),
+        { x: rx + 7, y: y - 29, size: 6.5, font: fontRegular, color: PCMG_COLORS.amberText }
+      );
+    }
+    y -= highH + 9;
+  }
+
+  // GRÁFICO 1: ÍNDICES POR MARCADOR (Barras horizontais + linha de aprovação)
+  page.drawText(`INDICES POR MARCADOR - ${catTitle} (ULTIMA MARCA REGISTRADA)`, {
+    x: marginX,
+    y: y - 8,
+    size: 8,
+    font: fontBold,
+    color: PCMG_COLORS.ink
+  });
+  y -= 13;
+
+  const col1W = contentWidth * 0.30;
+  const col2W = contentWidth * 0.30;
+  const col3W = contentWidth * 0.25;
+  const col4W = contentWidth - col1W - col2W - col3W;
+
+  const drawMarkerTableHeader = (p: PDFPage, curY: number): number => {
+    const hh = 15;
+    p.drawRectangle({
+      x: marginX,
+      y: curY - hh,
+      width: contentWidth,
+      height: hh,
+      color: PCMG_COLORS.slate100,
+      borderColor: PCMG_COLORS.slate300,
+      borderWidth: 0.6
+    });
+    const ty = curY - 10.5;
+    p.drawText('MARCADOR', { x: marginX + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    p.drawText('MARCA / TEMPO / NOTA', { x: marginX + col1W + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    p.drawText('INDICE (META)', { x: marginX + col1W + col2W + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    p.drawText('SITUACAO', { x: marginX + col1W + col2W + col3W + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    return curY - hh;
+  };
+
+  y = drawMarkerTableHeader(page, y);
+
+  const maxMarkersOnStrictPage = singlePageStrict ? Math.min(stats.markerSummaries.length, 9) : stats.markerSummaries.length;
+  const rowH = singlePageStrict ? 22 : 25;
+
+  for (let i = 0; i < maxMarkersOnStrictPage; i++) {
+    const m = stats.markerSummaries[i];
+    if (!singlePageStrict && y - rowH < 52) {
+      page = doc.addPage([pageWidth, pageHeight]);
+      y = drawPageTopHeader(page);
+      y = drawMarkerTableHeader(page, y);
+    }
+
+    const rowBottom = y - rowH;
+    page.drawRectangle({
+      x: marginX,
+      y: rowBottom,
+      width: contentWidth,
+      height: rowH,
+      color: i % 2 === 1 ? PCMG_COLORS.grayRow : PCMG_COLORS.white
+    });
+    page.drawLine({
+      start: { x: marginX, y: rowBottom },
+      end: { x: pageWidth - marginX, y: rowBottom },
+      thickness: 0.4,
+      color: PCMG_COLORS.slate200
+    });
+
+    const pct = m.latest.ausente ? 0 : Math.round(m.latestPct);
+    const apprPct = Math.round(m.approvalPct);
+    const barColor = m.latest.ausente
+      ? PCMG_COLORS.redText
+      : m.latest.aprovado
+      ? PCMG_COLORS.emerald700
+      : PCMG_COLORS.amber600;
+    const statusLabel = m.latest.ausente ? 'AUSENTE' : m.latest.aprovado ? 'APROVADO' : 'ABAIXO META';
+
+    page.drawText(fitTextToWidth(m.marcadorNome, fontBold, 7.2, col1W - 8), {
+      x: marginX + 5,
+      y: y - 9.5,
+      size: 7.2,
+      font: fontBold,
+      color: PCMG_COLORS.ink
+    });
+    const subMeta = `${m.tipoMarca ? `${m.tipoMarca} - ` : ''}${m.attempts} aval. (${fmtIsoDateBrPdf(m.latest.dataAvaliacao)})`;
+    page.drawText(fitTextToWidth(subMeta, fontRegular, 6, col1W - 8), {
+      x: marginX + 5,
+      y: y - 18,
+      size: 6,
+      font: fontRegular,
+      color: PCMG_COLORS.slate500
+    });
+
+    page.drawText(fitTextToWidth(formatResultadoResumoPdf(m.latest), fontRegular, 6.8, col2W - 8), {
+      x: marginX + col1W + 5,
+      y: y - 11.5,
+      size: 6.8,
+      font: fontRegular,
+      color: PCMG_COLORS.slate800
+    });
+
+    // Barra vetorial com linha de aprovação
+    const barX = marginX + col1W + col2W + 5;
+    const barW = col3W - 12;
+    const barH = 7;
+    const barY = y - 11;
+    page.drawRectangle({ x: barX, y: barY, width: barW, height: barH, color: PCMG_COLORS.slate200 });
+    const fillW = Math.max(0, Math.min(barW, (pct / 100) * barW));
+    if (fillW > 0) {
+      page.drawRectangle({ x: barX, y: barY, width: fillW, height: barH, color: barColor });
+    }
+    if (apprPct > 0 && apprPct <= 100) {
+      const cutX = barX + (apprPct / 100) * barW;
+      page.drawLine({
+        start: { x: cutX, y: barY - 1 },
+        end: { x: cutX, y: barY + barH + 1 },
+        thickness: 1.1,
+        color: PCMG_COLORS.ink
+      });
+    }
+    const barSub = m.latest.ausente ? 'Ausente' : `${pct}% (min. ${apprPct}%)`;
+    page.drawText(barSub, {
+      x: barX,
+      y: y - 19,
+      size: 6,
+      font: fontRegular,
+      color: PCMG_COLORS.slate600
+    });
+
+    page.drawText(statusLabel, {
+      x: marginX + col1W + col2W + col3W + 5,
+      y: y - 13,
+      size: 6.8,
+      font: fontBold,
+      color: barColor
+    });
+
+    y = rowBottom;
+  }
+
+  if (singlePageStrict && stats.markerSummaries.length > maxMarkersOnStrictPage) {
+    const moreTxt = `+ ${stats.markerSummaries.length - maxMarkersOnStrictPage} marcador(es) adicionais registrados no ano ${anoReferencia}.`;
+    page.drawText(moreTxt, { x: marginX + 4, y: y - 9, size: 6.2, font: fontRegular, color: PCMG_COLORS.slate500 });
+    y -= 12;
+  }
+
+  y -= 10;
+
+  // GRÁFICO 2: CURVA DE EVOLUÇÃO HISTÓRICA NO ANO
+  const chartH = singlePageStrict ? 102 : 122;
+  if (!singlePageStrict && y - chartH < 52) {
+    page = doc.addPage([pageWidth, pageHeight]);
+    y = drawPageTopHeader(page);
+  }
+  if (!singlePageStrict || y - chartH >= 52) {
+    y = drawEvolutionCurveChart({
+      page,
+      x: marginX,
+      yTop: y,
+      width: contentWidth,
+      height: chartH,
+      points: stats.evolution,
+      evolutionDelta: stats.evolutionDelta,
+      categoriaLabel: catTitle,
+      anoReferencia,
+      fontRegular,
+      fontBold
+    });
+    y -= 10;
+  }
+
+  // HISTÓRICO CRONOLÓGICO DE AVALIAÇÕES DO ANO
+  const historyList = [...stats.sorted].reverse();
+  const minSpaceForHist = 56;
+  if (!singlePageStrict && y < minSpaceForHist + 45) {
+    page = doc.addPage([pageWidth, pageHeight]);
+    y = drawPageTopHeader(page);
+  }
+
+  if (!singlePageStrict || y >= 84) {
+    page.drawText(`HISTORICO CRONOLOGICO DE AVALIACOES (${historyList.length} NO ANO ${anoReferencia})`, {
+      x: marginX,
+      y: y - 8,
+      size: 7.8,
+      font: fontBold,
+      color: PCMG_COLORS.ink
+    });
+    y -= 13;
+
+    const hCol1 = 50; // Data
+    const hCol2 = 122; // Marcador
+    const hCol3 = 122; // Atividade/Grupo
+    const hCol5 = 62; // Status
+    const hCol4 = contentWidth - hCol1 - hCol2 - hCol3 - hCol5; // Resultado
+
+    const drawHistHeader = (p: PDFPage, curY: number): number => {
+      const hh = 14;
+      p.drawRectangle({
+        x: marginX,
+        y: curY - hh,
+        width: contentWidth,
+        height: hh,
+        color: PCMG_COLORS.slate100,
+        borderColor: PCMG_COLORS.slate300,
+        borderWidth: 0.6
+      });
+      const ty = curY - 9.8;
+      p.drawText('DATA', { x: marginX + 4, y: ty, size: 6.2, font: fontBold, color: PCMG_COLORS.slate700 });
+      p.drawText('MARCADOR', { x: marginX + hCol1 + 4, y: ty, size: 6.2, font: fontBold, color: PCMG_COLORS.slate700 });
+      p.drawText('ATIVIDADE / GRUPO', { x: marginX + hCol1 + hCol2 + 4, y: ty, size: 6.2, font: fontBold, color: PCMG_COLORS.slate700 });
+      p.drawText('RESULTADO', { x: marginX + hCol1 + hCol2 + hCol3 + 4, y: ty, size: 6.2, font: fontBold, color: PCMG_COLORS.slate700 });
+      p.drawText('STATUS', { x: marginX + hCol1 + hCol2 + hCol3 + hCol4 + 4, y: ty, size: 6.2, font: fontBold, color: PCMG_COLORS.slate700 });
+      return curY - hh;
+    };
+
+    y = drawHistHeader(page, y);
+    const hRowH = 14.5;
+
+    for (let idx = 0; idx < historyList.length; idx++) {
+      if (y - hRowH < 44) {
+        if (singlePageStrict) {
+          const remaining = historyList.length - idx;
+          page.drawText(
+            `+ ${remaining} avaliacao(oes) adicional(is) registrada(s) no ano ${anoReferencia}.`,
+            { x: marginX + 4, y: y - 9, size: 6, font: fontRegular, color: PCMG_COLORS.slate500 }
+          );
+          break;
+        }
+        page = doc.addPage([pageWidth, pageHeight]);
+        y = drawPageTopHeader(page);
+        y = drawHistHeader(page, y);
+      }
+
+      const r = historyList[idx];
+      const rb = y - hRowH;
+      page.drawRectangle({
+        x: marginX,
+        y: rb,
+        width: contentWidth,
+        height: hRowH,
+        color: idx % 2 === 1 ? PCMG_COLORS.grayRow : PCMG_COLORS.white
+      });
+      page.drawLine({
+        start: { x: marginX, y: rb },
+        end: { x: pageWidth - marginX, y: rb },
+        thickness: 0.35,
+        color: PCMG_COLORS.slate200
+      });
+
+      const ty = y - 10;
+      const stColor = r.ausente ? PCMG_COLORS.redText : r.aprovado ? PCMG_COLORS.emerald700 : PCMG_COLORS.amber600;
+      const stTxt = r.ausente ? 'Ausente' : r.aprovado ? 'Aprovado' : 'Abaixo Meta';
+
+      page.drawText(fmtIsoDateBrPdf(r.dataAvaliacao), { x: marginX + 4, y: ty, size: 6.4, font: fontRegular, color: PCMG_COLORS.slate700 });
+      page.drawText(fitTextToWidth(r.marcadorNome, fontBold, 6.4, hCol2 - 6), { x: marginX + hCol1 + 4, y: ty, size: 6.4, font: fontBold, color: PCMG_COLORS.ink });
+      page.drawText(fitTextToWidth(r.atividadeNome || r.grupoNome || '-', fontRegular, 6.3, hCol3 - 6), {
+        x: marginX + hCol1 + hCol2 + 4,
+        y: ty,
+        size: 6.3,
+        font: fontRegular,
+        color: PCMG_COLORS.slate700
+      });
+      page.drawText(fitTextToWidth(formatResultadoResumoPdf(r), fontRegular, 6.3, hCol4 - 6), {
+        x: marginX + hCol1 + hCol2 + hCol3 + 4,
+        y: ty,
+        size: 6.3,
+        font: fontRegular,
+        color: PCMG_COLORS.slate800
+      });
+      page.drawText(stTxt, { x: marginX + hCol1 + hCol2 + hCol3 + hCol4 + 4, y: ty, size: 6.3, font: fontBold, color: stColor });
+      y = rb;
+    }
+  }
+}
+
+export async function generateSystemFichaDesempenhoIndividualPdf(
+  params: SystemFichaIndividualPdfParams
+): Promise<Buffer> {
+  const doc = await PDFDocument.create();
+  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const fontMono = await doc.embedFont(StandardFonts.Courier);
+  const fontMonoBold = await doc.embedFont(StandardFonts.CourierBold);
+  const logoImage = await tryEmbedSystemLogo(doc, params.logoDataUri);
+
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const marginX = 28;
+  const docCode = generateUniqueDocControlCode();
+  const emissaoBr = formatDateTimeBr(params.geradoEm);
+
+  const firstPage = doc.addPage([pageWidth, pageHeight]);
+  await renderSingleUserPerformancePage({
+    doc,
+    page: firstPage,
+    pageWidth,
+    pageHeight,
+    marginX,
+    fontRegular,
+    fontBold,
+    fontMono,
+    fontMonoBold,
+    logoImage,
+    docCode,
+    emissaoBr,
+    categoria: params.categoria,
+    anoReferencia: params.anoReferencia,
+    departamentoLabel: params.departamentoLabel,
+    unidadeLabel: params.unidadeLabel,
+    solicitanteNome: params.solicitanteNome,
+    usuario: params.usuario,
+    singlePageStrict: false
+  });
+
+  const catLabel = params.categoria === 'FISICO' ? 'Desempenho Fisico' : 'Desempenho Operacional / Tecnico-Tatico';
+  drawInstitutionalFooters({
+    doc,
+    marginX,
+    pageWidth,
+    fontMono,
+    fontMonoBold,
+    docCode,
+    emissaoBr,
+    footerLeftText: `Sistema ARMARIA - PCMG | Ficha Individual (${catLabel} - ${params.anoReferencia}) - ${params.unidadeLabel}`
+  });
+
+  return Buffer.from(await doc.save());
+}
+
+export async function generateSystemFichaDesempenhoUnidadePdf(
+  params: SystemFichaUnidadePdfParams
+): Promise<Buffer> {
+  const doc = await PDFDocument.create();
+  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const fontMono = await doc.embedFont(StandardFonts.Courier);
+  const fontMonoBold = await doc.embedFont(StandardFonts.CourierBold);
+  const logoImage = await tryEmbedSystemLogo(doc, params.logoDataUri);
+
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const marginX = 28;
+  const contentWidth = pageWidth - marginX * 2;
+  const docCode = generateUniqueDocControlCode();
+  const emissaoBr = formatDateTimeBr(params.geradoEm);
+  const catTitle = params.categoria === 'FISICO' ? 'TREINAMENTO FISICO' : 'TREINAMENTO TECNICO / TATICO (OPERACIONAL)';
+
+  // ---- PÁGINA 1: RESUMO DA UNIDADE (TODOS OS MARCADORES E ATIVIDADES DO ANO) ----
+  let summaryPage = doc.addPage([pageWidth, pageHeight]);
+
+  const drawSummaryHeader = (p: PDFPage): number => {
+    let curY = drawTopUniqueCodeBar(p, pageWidth, pageHeight, marginX, fontMono, fontMonoBold, docCode, emissaoBr);
+    curY -= 4;
+    const headerTop = curY;
+    let textStartX = marginX;
+    if (logoImage) {
+      const dims = logoImage.scaleToFit(38, 38);
+      p.drawImage(logoImage, { x: marginX, y: headerTop - dims.height - 2, width: dims.width, height: dims.height });
+      textStartX = marginX + dims.width + 10;
+    }
+    p.drawText('POLICIA CIVIL DE MINAS GERAIS', { x: textStartX, y: headerTop - 10, size: 7.5, font: fontBold, color: PCMG_COLORS.slate600 });
+    p.drawText(
+      fitTextToWidth(`QUADRO RESUMO DA UNIDADE - ${catTitle}`, fontBold, 11, contentWidth - (textStartX - marginX) - 130),
+      { x: textStartX, y: headerTop - 22, size: 11, font: fontBold, color: PCMG_COLORS.ink }
+    );
+    p.drawText(
+      fitTextToWidth(`${params.unidadeLabel} - ${params.departamentoLabel} | Ano ${params.anoReferencia}`, fontRegular, 7.8, contentWidth - (textStartX - marginX) - 130),
+      { x: textStartX, y: headerTop - 34, size: 7.8, font: fontRegular, color: PCMG_COLORS.slate600 }
+    );
+
+    const rightLines = [
+      `Emissao: ${emissaoBr.slice(0, 16)}`,
+      `Solicitante: ${fitTextToWidth(params.solicitanteNome, fontRegular, 7, 115)}`,
+      `Efetivo: ${params.usuarios.length} policial(is)`
+    ];
+    let ry = headerTop - 11;
+    for (const rl of rightLines) {
+      const rw = fontRegular.widthOfTextAtSize(rl, 7);
+      p.drawText(rl, { x: pageWidth - marginX - rw, y: ry, size: 7, font: fontRegular, color: PCMG_COLORS.slate600 });
+      ry -= 10;
+    }
+
+    const lineY = headerTop - 46;
+    p.drawLine({ start: { x: marginX, y: lineY }, end: { x: pageWidth - marginX, y: lineY }, thickness: 1.6, color: PCMG_COLORS.ink });
+    return lineY - 10;
+  };
+
+  let y = drawSummaryHeader(summaryPage);
+
+  // KPI strip do quadro da unidade
+  const totalAvalUnidade = params.usuarios.reduce((s, u) => s + u.resultados.length, 0);
+  const kpiCards = [
+    { lbl: 'ANO DE REFERENCIA', val: String(params.anoReferencia) },
+    { lbl: 'MARCADORES ATIVOS', val: String(params.marcadores.length) },
+    { lbl: 'ATIVIDADES NO ANO', val: String(params.atividades.length) },
+    { lbl: 'POLICIAIS DA UNIDADE', val: String(params.usuarios.length) },
+    { lbl: 'AVALIACOES NO ANO', val: String(totalAvalUnidade) }
+  ];
+  const kw = (contentWidth - (kpiCards.length - 1) * 6) / kpiCards.length;
+  kpiCards.forEach((kc, idx) => {
+    const kx = marginX + idx * (kw + 6);
+    summaryPage.drawRectangle({
+      x: kx,
+      y: y - 32,
+      width: kw,
+      height: 32,
+      color: PCMG_COLORS.slate50,
+      borderColor: PCMG_COLORS.slate300,
+      borderWidth: 0.7
+    });
+    summaryPage.drawText(kc.lbl, { x: kx + 6, y: y - 10, size: 5.8, font: fontBold, color: PCMG_COLORS.slate500 });
+    summaryPage.drawText(kc.val, { x: kx + 6, y: y - 24, size: 11, font: fontBold, color: PCMG_COLORS.ink });
+  });
+  y -= 44;
+
+  // TABELA 1: TODOS OS MARCADORES DA CATEGORIA
+  summaryPage.drawText(`1. MARCADORES CADASTRADOS - ${catTitle} (${params.marcadores.length})`, {
+    x: marginX,
+    y: y - 8,
+    size: 8.5,
+    font: fontBold,
+    color: PCMG_COLORS.ink
+  });
+  y -= 14;
+
+  const mCol1 = contentWidth * 0.30; // Nome
+  const mCol2 = contentWidth * 0.24; // Tipo / Arma
+  const mCol3 = contentWidth * 0.22; // Meta de Aprovacao
+  const mCol4 = contentWidth * 0.13; // Dificuldade
+  const mCol5 = contentWidth - mCol1 - mCol2 - mCol3 - mCol4; // Aval. no ano
+
+  const drawMarcadoresHead = (p: PDFPage, curY: number): number => {
+    const hh = 16;
+    p.drawRectangle({ x: marginX, y: curY - hh, width: contentWidth, height: hh, color: PCMG_COLORS.slate100, borderColor: PCMG_COLORS.slate300, borderWidth: 0.6 });
+    const ty = curY - 11;
+    p.drawText('MARCADOR', { x: marginX + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    p.drawText(params.categoria === 'FISICO' ? 'TIPO / UNIDADE' : 'ARMA / TIROS', { x: marginX + mCol1 + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    p.drawText('META DE APROVACAO', { x: marginX + mCol1 + mCol2 + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    p.drawText('DIFICULDADE', { x: marginX + mCol1 + mCol2 + mCol3 + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    p.drawText('AVAL. ANO', { x: marginX + mCol1 + mCol2 + mCol3 + mCol4 + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    return curY - hh;
+  };
+
+  y = drawMarcadoresHead(summaryPage, y);
+
+  if (params.marcadores.length === 0) {
+    summaryPage.drawRectangle({ x: marginX, y: y - 18, width: contentWidth, height: 18, color: PCMG_COLORS.white, borderColor: PCMG_COLORS.slate200, borderWidth: 0.5 });
+    summaryPage.drawText('Nenhum marcador cadastrado para esta categoria.', { x: marginX + 6, y: y - 12, size: 7, font: fontRegular, color: PCMG_COLORS.slate500 });
+    y -= 26;
+  } else {
+    for (let i = 0; i < params.marcadores.length; i++) {
+      const m = params.marcadores[i];
+      const rh = 18;
+      if (y - rh < 48) {
+        summaryPage = doc.addPage([pageWidth, pageHeight]);
+        y = drawSummaryHeader(summaryPage);
+        y = drawMarcadoresHead(summaryPage, y);
+      }
+      const rb = y - rh;
+      summaryPage.drawRectangle({ x: marginX, y: rb, width: contentWidth, height: rh, color: i % 2 === 1 ? PCMG_COLORS.grayRow : PCMG_COLORS.white });
+      summaryPage.drawLine({ start: { x: marginX, y: rb }, end: { x: pageWidth - marginX, y: rb }, thickness: 0.4, color: PCMG_COLORS.slate200 });
+
+      const tipoCol =
+        params.categoria === 'FISICO'
+          ? [m.tipoMarca, m.unidadeMedida].filter(Boolean).join(' / ') || 'Fisico'
+          : m.teveTiro
+          ? `${m.tipoArma || 'Arma'}${m.quantidadeTiros ? ` (${m.quantidadeTiros} tiros)` : ''}`
+          : 'Sem disparo';
+      const metaCol = `>= ${fmtNumBrPdf(m.notaAprovacao)}/${fmtNumBrPdf(m.notaMax)} pts${
+        m.usaTempo && m.tempoAprovacaoSeg != null ? ` | <= ${fmtSecondsCompactPdf(m.tempoAprovacaoSeg)}` : ''
+      }`;
+      const ty = y - 12;
+
+      summaryPage.drawText(fitTextToWidth(m.nome, fontBold, 7, mCol1 - 8), { x: marginX + 5, y: ty, size: 7, font: fontBold, color: PCMG_COLORS.ink });
+      summaryPage.drawText(fitTextToWidth(tipoCol, fontRegular, 6.8, mCol2 - 8), { x: marginX + mCol1 + 5, y: ty, size: 6.8, font: fontRegular, color: PCMG_COLORS.slate700 });
+      summaryPage.drawText(fitTextToWidth(metaCol, fontRegular, 6.8, mCol3 - 8), { x: marginX + mCol1 + mCol2 + 5, y: ty, size: 6.8, font: fontRegular, color: PCMG_COLORS.slate800 });
+      summaryPage.drawText(fitTextToWidth(m.dificuldade || '-', fontRegular, 6.8, mCol4 - 8), { x: marginX + mCol1 + mCol2 + mCol3 + 5, y: ty, size: 6.8, font: fontRegular, color: PCMG_COLORS.slate700 });
+      summaryPage.drawText(String(m.totalAvaliacoesAno), { x: marginX + mCol1 + mCol2 + mCol3 + mCol4 + 8, y: ty, size: 7, font: fontBold, color: PCMG_COLORS.ink });
+      y = rb;
+    }
+    y -= 14;
+  }
+
+  // TABELA 2: TODAS AS ATIVIDADES DO ANO
+  if (y < 95) {
+    summaryPage = doc.addPage([pageWidth, pageHeight]);
+    y = drawSummaryHeader(summaryPage);
+  }
+  summaryPage.drawText(`2. ATIVIDADES REALIZADAS NO ANO ${params.anoReferencia} - ${catTitle} (${params.atividades.length})`, {
+    x: marginX,
+    y: y - 8,
+    size: 8.5,
+    font: fontBold,
+    color: PCMG_COLORS.ink
+  });
+  y -= 14;
+
+  const aCol1 = 68; // Data / Hora
+  const aCol2 = contentWidth * 0.28; // Nome Atividade
+  const aCol3 = contentWidth * 0.36; // Marcadores
+  const aCol4 = 52; // Avaliacoes
+  const aCol5 = contentWidth - aCol1 - aCol2 - aCol3 - aCol4; // Descricao
+
+  const drawAtivHead = (p: PDFPage, curY: number): number => {
+    const hh = 16;
+    p.drawRectangle({ x: marginX, y: curY - hh, width: contentWidth, height: hh, color: PCMG_COLORS.slate100, borderColor: PCMG_COLORS.slate300, borderWidth: 0.6 });
+    const ty = curY - 11;
+    p.drawText('DATA / HORA', { x: marginX + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    p.drawText('ATIVIDADE', { x: marginX + aCol1 + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    p.drawText('MARCADORES APLICADOS', { x: marginX + aCol1 + aCol2 + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    p.drawText('AVAL.', { x: marginX + aCol1 + aCol2 + aCol3 + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    p.drawText('OBSERVACOES', { x: marginX + aCol1 + aCol2 + aCol3 + aCol4 + 5, y: ty, size: 6.5, font: fontBold, color: PCMG_COLORS.slate700 });
+    return curY - hh;
+  };
+
+  y = drawAtivHead(summaryPage, y);
+
+  if (params.atividades.length === 0) {
+    summaryPage.drawRectangle({ x: marginX, y: y - 18, width: contentWidth, height: 18, color: PCMG_COLORS.white, borderColor: PCMG_COLORS.slate200, borderWidth: 0.5 });
+    summaryPage.drawText(`Nenhuma atividade registrada para esta categoria no ano ${params.anoReferencia}.`, {
+      x: marginX + 6,
+      y: y - 12,
+      size: 7,
+      font: fontRegular,
+      color: PCMG_COLORS.slate500
+    });
+  } else {
+    for (let i = 0; i < params.atividades.length; i++) {
+      const a = params.atividades[i];
+      const marcLines = wrapCellLines(a.marcadoresNomes.join(', ') || '-', fontRegular, 6.5, aCol3 - 8, 3);
+      const descLines = wrapCellLines(a.descricao || '-', fontRegular, 6.3, aCol5 - 8, 3);
+      const maxL = Math.max(1, marcLines.length, descLines.length);
+      const rh = Math.max(18, maxL * 9 + 7);
+
+      if (y - rh < 48) {
+        summaryPage = doc.addPage([pageWidth, pageHeight]);
+        y = drawSummaryHeader(summaryPage);
+        y = drawAtivHead(summaryPage, y);
+      }
+
+      const rb = y - rh;
+      summaryPage.drawRectangle({ x: marginX, y: rb, width: contentWidth, height: rh, color: i % 2 === 1 ? PCMG_COLORS.grayRow : PCMG_COLORS.white });
+      summaryPage.drawLine({ start: { x: marginX, y: rb }, end: { x: pageWidth - marginX, y: rb }, thickness: 0.4, color: PCMG_COLORS.slate200 });
+
+      const dtStr = `${fmtIsoDateBrPdf(a.dataAtividade)}${a.horaAtividade ? ` ${String(a.horaAtividade).slice(0, 5)}` : ''}`;
+      summaryPage.drawText(fitTextToWidth(dtStr, fontRegular, 6.5, aCol1 - 6), { x: marginX + 5, y: y - 11, size: 6.5, font: fontRegular, color: PCMG_COLORS.slate700 });
+      summaryPage.drawText(fitTextToWidth(a.nome, fontBold, 6.8, aCol2 - 8), { x: marginX + aCol1 + 5, y: y - 11, size: 6.8, font: fontBold, color: PCMG_COLORS.ink });
+
+      let ly = y - 11;
+      for (const ml of marcLines) {
+        summaryPage.drawText(ml, { x: marginX + aCol1 + aCol2 + 5, y: ly, size: 6.5, font: fontRegular, color: PCMG_COLORS.slate800 });
+        ly -= 9;
+      }
+      summaryPage.drawText(String(a.totalAvaliacoesAno), { x: marginX + aCol1 + aCol2 + aCol3 + 8, y: y - 11, size: 7, font: fontBold, color: PCMG_COLORS.ink });
+
+      let dy = y - 11;
+      for (const dl of descLines) {
+        summaryPage.drawText(dl, { x: marginX + aCol1 + aCol2 + aCol3 + aCol4 + 5, y: dy, size: 6.3, font: fontRegular, color: PCMG_COLORS.slate600 });
+        dy -= 9;
+      }
+      y = rb;
+    }
+  }
+
+  // ---- PÁGINAS SEGUINTES: ESTRITAMENTE 1 USUÁRIO POR PÁGINA ----
+  for (const usuario of params.usuarios) {
+    const userPage = doc.addPage([pageWidth, pageHeight]);
+    await renderSingleUserPerformancePage({
+      doc,
+      page: userPage,
+      pageWidth,
+      pageHeight,
+      marginX,
+      fontRegular,
+      fontBold,
+      fontMono,
+      fontMonoBold,
+      logoImage,
+      docCode,
+      emissaoBr,
+      categoria: params.categoria,
+      anoReferencia: params.anoReferencia,
+      departamentoLabel: params.departamentoLabel,
+      unidadeLabel: params.unidadeLabel,
+      solicitanteNome: params.solicitanteNome,
+      usuario,
+      singlePageStrict: true
+    });
+  }
+
+  const catLabel = params.categoria === 'FISICO' ? 'Fichas Fisicas' : 'Fichas Operacionais';
+  drawInstitutionalFooters({
+    doc,
+    marginX,
+    pageWidth,
+    fontMono,
+    fontMonoBold,
+    docCode,
+    emissaoBr,
+    footerLeftText: `Sistema ARMARIA - PCMG | ${catLabel} da Unidade ${params.unidadeLabel} (Ano ${params.anoReferencia})`
+  });
+
+  return Buffer.from(await doc.save());
+}
+
+function calcK9AgeTextPdf(dataNascimento?: string | null, refDate = new Date()): string {
+  if (!dataNascimento || !/^\d{4}-\d{2}-\d{2}/.test(dataNascimento)) return 'Nao informada';
+  const [y, m, d] = dataNascimento.slice(0, 10).split('-').map(Number);
+  const birth = new Date(y, (m || 1) - 1, d || 1);
+  if (Number.isNaN(birth.getTime()) || birth > refDate) return 'Nao informada';
+  let years = refDate.getFullYear() - birth.getFullYear();
+  let months = refDate.getMonth() - birth.getMonth();
+  if (refDate.getDate() < birth.getDate()) months -= 1;
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  if (years <= 0 && months <= 0) return 'Menos de 1 mes';
+  if (years <= 0) return `${months} ${months === 1 ? 'mes' : 'meses'}`;
+  if (months === 0) return `${years} ${years === 1 ? 'ano' : 'anos'}`;
+  return `${years} ${years === 1 ? 'ano' : 'anos'} e ${months} ${months === 1 ? 'mes' : 'meses'}`;
+}
+
+function formatSugestaoTopicosPdf(list: string[]): string {
+  if (list.length === 0) return 'Sem topicos cadastrados';
+  if (list.length <= 4) return list.join(' - ');
+  return `${list.slice(0, 4).join(' - ')} e outros`;
+}
+
+export async function generateSystemFichaDesempenhoK9Pdf(
+  params: SystemFichaK9PdfParams
+): Promise<Buffer> {
+  const doc = await PDFDocument.create();
+  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const fontMono = await doc.embedFont(StandardFonts.Courier);
+  const fontMonoBold = await doc.embedFont(StandardFonts.CourierBold);
+  const logoImage = await tryEmbedSystemLogo(doc, params.logoDataUri);
+
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const marginX = 28;
+  const contentWidth = pageWidth - marginX * 2;
+  const docCode = generateUniqueDocControlCode();
+  const emissaoBr = formatDateTimeBr(params.geradoEm);
+  const todayIso = (() => {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(params.geradoEm);
+    } catch {
+      return params.geradoEm.toISOString().slice(0, 10);
+    }
+  })();
+
+  const blueBar = rgb(0.145, 0.388, 0.922); // #2563eb
+  const cyanBorder = rgb(0.647, 0.953, 0.988);
+  const cyanTitle = rgb(0.055, 0.455, 0.565);
+
+  const drawCocHeader = (p: PDFPage, subtitle: string): number => {
+    let curY = drawTopUniqueCodeBar(p, pageWidth, pageHeight, marginX, fontMono, fontMonoBold, docCode, emissaoBr);
+    curY -= 4;
+    const topY = curY;
+    let textX = marginX;
+    if (logoImage) {
+      const dims = logoImage.scaleToFit(36, 36);
+      p.drawImage(logoImage, { x: marginX, y: topY - dims.height - 2, width: dims.width, height: dims.height });
+      textX = marginX + dims.width + 9;
+    }
+    p.drawText(
+      fitTextToWidth(`POLICIA CIVIL DE MINAS GERAIS - ${params.unidadeLabel}`, fontBold, 10, contentWidth - (textX - marginX) - 125),
+      { x: textX, y: topY - 13, size: 10, font: fontBold, color: PCMG_COLORS.ink }
+    );
+    p.drawText(
+      fitTextToWidth(subtitle, fontBold, 8.2, contentWidth - (textX - marginX) - 125),
+      { x: textX, y: topY - 26, size: 8.2, font: fontBold, color: PCMG_COLORS.slate700 }
+    );
+
+    const r1 = `Emissao: ${fmtIsoDateBrPdf(todayIso)}`;
+    const r2 = `${params.departamentoLabel} - ${params.unidadeLabel}`;
+    const r3 = `Ano Referencia: ${params.anoReferencia}`;
+    [r1, r2, r3].forEach((rl, i) => {
+      const rw = fontRegular.widthOfTextAtSize(rl, 7);
+      p.drawText(rl, { x: pageWidth - marginX - rw, y: topY - 10 - i * 9.5, size: 7, font: fontRegular, color: PCMG_COLORS.slate600 });
+    });
+
+    const lineY = topY - 42;
+    p.drawLine({ start: { x: marginX, y: lineY }, end: { x: pageWidth - marginX, y: lineY }, thickness: 1.6, color: PCMG_COLORS.ink });
+    return lineY - 9;
+  };
+
+  // ---- MODO UNIDADE ("Gráfico dos K9"): PÁGINA 1 = TABELA COM APENAS 3 COLUNAS (NOME DO ANIMAL | BAIA | CONDUTOR) ----
+  if (params.mode === 'unidade') {
+    let summaryPage = doc.addPage([pageWidth, pageHeight]);
+    let y = drawCocHeader(
+      summaryPage,
+      `Relacao Geral de Animais K9 da Unidade - Ano ${params.anoReferencia} (${params.animais.length} animal(is))`
+    );
+
+    const colNomeW = contentWidth * 0.30;
+    const colBaiaW = contentWidth * 0.28;
+    const colCondW = contentWidth - colNomeW - colBaiaW;
+
+    const drawK9TableHeader = (p: PDFPage, curY: number): number => {
+      const hh = 20;
+      p.drawRectangle({
+        x: marginX,
+        y: curY - hh,
+        width: contentWidth,
+        height: hh,
+        color: PCMG_COLORS.ink
+      });
+      const ty = curY - 13;
+      p.drawText('NOME DO ANIMAL', { x: marginX + 8, y: ty, size: 8, font: fontBold, color: PCMG_COLORS.white });
+      p.drawText('BAIA', { x: marginX + colNomeW + 8, y: ty, size: 8, font: fontBold, color: PCMG_COLORS.white });
+      p.drawText('CONDUTOR', { x: marginX + colNomeW + colBaiaW + 8, y: ty, size: 8, font: fontBold, color: PCMG_COLORS.white });
+      return curY - hh;
+    };
+
+    y = drawK9TableHeader(summaryPage, y);
+
+    for (let i = 0; i < params.animais.length; i++) {
+      const dog = params.animais[i];
+      const condLines = wrapCellLines(dog.condutorTexto || 'Nao vinculado', fontRegular, 8, colCondW - 14, 3);
+      const baiaLines = wrapCellLines(dog.baiaBox || 'Nao alocada', fontRegular, 8, colBaiaW - 14, 2);
+      const rh = Math.max(21, Math.max(condLines.length, baiaLines.length) * 10.5 + 9);
+
+      if (y - rh < 48) {
+        summaryPage = doc.addPage([pageWidth, pageHeight]);
+        y = drawCocHeader(summaryPage, `Relacao Geral de Animais K9 da Unidade (Continuacao) - Ano ${params.anoReferencia}`);
+        y = drawK9TableHeader(summaryPage, y);
+      }
+
+      const rb = y - rh;
+      summaryPage.drawRectangle({
+        x: marginX,
+        y: rb,
+        width: contentWidth,
+        height: rh,
+        color: i % 2 === 1 ? PCMG_COLORS.grayRow : PCMG_COLORS.white,
+        borderColor: PCMG_COLORS.slate200,
+        borderWidth: 0.4
+      });
+
+      summaryPage.drawText(fitTextToWidth(dog.nome.toUpperCase(), fontBold, 8.2, colNomeW - 14), {
+        x: marginX + 8,
+        y: y - 13,
+        size: 8.2,
+        font: fontBold,
+        color: PCMG_COLORS.ink
+      });
+
+      let by = y - 13;
+      for (const bl of baiaLines) {
+        summaryPage.drawText(bl, { x: marginX + colNomeW + 8, y: by, size: 8, font: fontRegular, color: PCMG_COLORS.slate800 });
+        by -= 10.5;
+      }
+
+      let cy = y - 13;
+      for (const cl of condLines) {
+        summaryPage.drawText(cl, { x: marginX + colNomeW + colBaiaW + 8, y: cy, size: 8, font: fontRegular, color: PCMG_COLORS.slate800 });
+        cy -= 10.5;
+      }
+
+      y = rb;
+    }
+  }
+
+  // ---- PÁGINAS INDIVIDUAIS: 1 ANIMAL POR PÁGINA (IDÊNTICO AO "IMPRIMIR GRÁFICO" DA ABA ANIMAIS) ----
+  for (const dog of params.animais) {
+    const page = doc.addPage([pageWidth, pageHeight]);
+    let y = drawCocHeader(page, `Ficha de Desempenho e Topicos de Treinamento K9 - Ano ${params.anoReferencia}`);
+
+    // Status vacinal
+    const vacinasSorted = [...dog.vacinas].sort((a, b) =>
+      String(b.dataAplicacao || '').localeCompare(String(a.dataAplicacao || ''))
+    );
+    const overdueVac = vacinasSorted.filter(v => v.proximaDose && String(v.proximaDose) < todayIso).length;
+    const vacBadgeLabel =
+      vacinasSorted.length === 0
+        ? 'SEM VACINAS REGISTRADAS'
+        : overdueVac === 0
+        ? 'VACINAS EM DIA'
+        : `${overdueVac} REFORCO(S) PENDENTE(S)`;
+    const vacBadgeBg = vacinasSorted.length === 0 ? PCMG_COLORS.slate100 : overdueVac === 0 ? PCMG_COLORS.emeraldBg : PCMG_COLORS.redBg;
+    const vacBadgeBorder = vacinasSorted.length === 0 ? PCMG_COLORS.slate300 : overdueVac === 0 ? PCMG_COLORS.emeraldBorder : PCMG_COLORS.redBorder;
+    const vacBadgeTxt = vacinasSorted.length === 0 ? PCMG_COLORS.slate600 : overdueVac === 0 ? PCMG_COLORS.emeraldText : PCMG_COLORS.redText;
+
+    // 1. Card de Perfil do Animal
+    const cardH = 112;
+    const cardBottom = y - cardH;
+    page.drawRectangle({
+      x: marginX,
+      y: cardBottom,
+      width: contentWidth,
+      height: cardH,
+      color: PCMG_COLORS.slate50,
+      borderColor: PCMG_COLORS.slate300,
+      borderWidth: 0.8
+    });
+
+    // Foto 3x4 K9
+    const photoW = 68;
+    const photoH = 92;
+    const photoX = marginX + 9;
+    const photoY = cardBottom + 10;
+    const dogPhoto = await tryEmbedPhotoDataUri(doc, dog.fotoUrl);
+    page.drawRectangle({
+      x: photoX,
+      y: photoY,
+      width: photoW,
+      height: photoH,
+      color: PCMG_COLORS.slate200,
+      borderColor: PCMG_COLORS.amber600,
+      borderWidth: 1.1
+    });
+    if (dogPhoto) {
+      const dims = dogPhoto.scaleToFit(photoW - 2, photoH - 2);
+      page.drawImage(dogPhoto, {
+        x: photoX + (photoW - dims.width) / 2,
+        y: photoY + (photoH - dims.height) / 2,
+        width: dims.width,
+        height: dims.height
+      });
+    } else {
+      const l1 = 'FOTO 3x4';
+      const l2 = 'K9';
+      page.drawText(l1, { x: photoX + (photoW - fontBold.widthOfTextAtSize(l1, 7.5)) / 2, y: photoY + 48, size: 7.5, font: fontBold, color: PCMG_COLORS.slate500 });
+      page.drawText(l2, { x: photoX + (photoW - fontBold.widthOfTextAtSize(l2, 9)) / 2, y: photoY + 35, size: 9, font: fontBold, color: PCMG_COLORS.slate600 });
+    }
+
+    const bodyX = photoX + photoW + 10;
+    const bodyW = contentWidth - (photoW + 28);
+
+    // Nome + Raça + Badge Vacina
+    const badgeW = fontBold.widthOfTextAtSize(vacBadgeLabel, 6.5) + 12;
+    page.drawRectangle({
+      x: bodyX + bodyW - badgeW,
+      y: y - 21,
+      width: badgeW,
+      height: 14,
+      color: vacBadgeBg,
+      borderColor: vacBadgeBorder,
+      borderWidth: 0.6
+    });
+    page.drawText(vacBadgeLabel, {
+      x: bodyX + bodyW - badgeW + 6,
+      y: y - 16.5,
+      size: 6.5,
+      font: fontBold,
+      color: vacBadgeTxt
+    });
+
+    page.drawText(fitTextToWidth(dog.nome.toUpperCase(), fontBold, 12, bodyW - badgeW - 8), {
+      x: bodyX,
+      y: y - 16,
+      size: 12,
+      font: fontBold,
+      color: PCMG_COLORS.ink
+    });
+    const racaSpec = `${dog.raca || 'Raca nao informada'}${dog.especialidade ? ` - ${dog.especialidade}` : ''}`;
+    page.drawText(fitTextToWidth(racaSpec, fontBold, 7.5, bodyW - badgeW - 8), {
+      x: bodyX,
+      y: y - 26,
+      size: 7.5,
+      font: fontBold,
+      color: PCMG_COLORS.amber700
+    });
+
+    // Grid 3x2 de metadados do animal
+    const metaFields = [
+      { lbl: 'COR / PELAGEM', val: dog.pelagem || 'Nao informada', color: PCMG_COLORS.ink },
+      { lbl: 'NASCIMENTO / IDADE', val: `${fmtIsoDateBrPdf(dog.dataNascimento)} (${calcK9AgeTextPdf(dog.dataNascimento, params.geradoEm)})`, color: PCMG_COLORS.ink },
+      { lbl: 'BAIA / BOX', val: dog.baiaBox || 'Nao alocada', color: PCMG_COLORS.ink },
+      { lbl: 'MICROCHIP', val: dog.microchip || 'Nao informado', color: PCMG_COLORS.ink },
+      { lbl: 'STATUS', val: dog.status || '-', color: PCMG_COLORS.ink },
+      { lbl: `TREINAMENTOS (${params.anoReferencia})`, val: String(dog.totalTreinosAno), color: PCMG_COLORS.amber700 }
+    ];
+    const mW = (bodyW - 10) / 3;
+    const mH = 24;
+    metaFields.forEach((mf, idx) => {
+      const col = idx % 3;
+      const row = Math.floor(idx / 3);
+      const mx = bodyX + col * (mW + 5);
+      const my = y - 32 - row * (mH + 4) - mH;
+      page.drawRectangle({ x: mx, y: my, width: mW, height: mH, color: PCMG_COLORS.white, borderColor: PCMG_COLORS.slate200, borderWidth: 0.6 });
+      page.drawText(mf.lbl, { x: mx + 5, y: my + 16, size: 5.5, font: fontBold, color: PCMG_COLORS.slate500 });
+      page.drawText(fitTextToWidth(mf.val, fontBold, 7.2, mW - 10), { x: mx + 5, y: my + 5.5, size: 7.2, font: fontBold, color: mf.color });
+    });
+
+    // Barra de Condutor(es)
+    const condBarY = cardBottom + 6;
+    page.drawRectangle({ x: bodyX, y: condBarY, width: bodyW, height: 15, color: PCMG_COLORS.white, borderColor: PCMG_COLORS.slate200, borderWidth: 0.6 });
+    page.drawText('CONDUTOR(ES):', { x: bodyX + 5, y: condBarY + 5, size: 6.2, font: fontBold, color: PCMG_COLORS.slate500 });
+    page.drawText(fitTextToWidth(dog.condutorTexto || 'Nao vinculado', fontBold, 7, bodyW - 68), {
+      x: bodyX + 62,
+      y: condBarY + 5,
+      size: 7,
+      font: fontBold,
+      color: PCMG_COLORS.ink
+    });
+
+    y = cardBottom - 9;
+
+    // 2. Cards Aptidão & Sugestão de Treinamento
+    const halfW = (contentWidth - 8) / 2;
+    const highH = 36;
+    const aptText =
+      dog.aptidaoTopicos.length > 0
+        ? `${dog.aptidaoTopicos.join(' - ')} (${dog.maxCount} ${dog.maxCount === 1 ? 'treino' : 'treinos'})`
+        : `Nenhum topico treinado em ${params.anoReferencia}`;
+    const sugText =
+      dog.sugestaoTopicos.length > 0
+        ? `${formatSugestaoTopicosPdf(dog.sugestaoTopicos)} (${dog.minCount} ${dog.minCount === 1 ? 'treino' : 'treinos'})`
+        : 'Sem topicos cadastrados';
+
+    page.drawRectangle({ x: marginX, y: y - highH, width: halfW, height: highH, color: PCMG_COLORS.emeraldBg, borderColor: PCMG_COLORS.emeraldBorder, borderWidth: 0.8 });
+    page.drawText('APTIDAO EM (MAIS TREINADO)', { x: marginX + 7, y: y - 11, size: 6.5, font: fontBold, color: PCMG_COLORS.emerald700 });
+    const aptLines = wrapCellLines(aptText, fontBold, 7.5, halfW - 14, 2);
+    aptLines.forEach((l, li) => {
+      page.drawText(l, { x: marginX + 7, y: y - 21 - li * 9.5, size: 7.5, font: fontBold, color: PCMG_COLORS.emeraldText });
+    });
+
+    const sx = marginX + halfW + 8;
+    page.drawRectangle({ x: sx, y: y - highH, width: halfW, height: highH, color: PCMG_COLORS.amberBg, borderColor: PCMG_COLORS.amberBorder, borderWidth: 0.8 });
+    page.drawText('SUGESTAO DE TREINAMENTO (MENOR INDICE)', { x: sx + 7, y: y - 11, size: 6.5, font: fontBold, color: PCMG_COLORS.amber700 });
+    const sugLines = wrapCellLines(sugText, fontBold, 7.5, halfW - 14, 2);
+    sugLines.forEach((l, li) => {
+      page.drawText(l, { x: sx + 7, y: y - 21 - li * 9.5, size: 7.5, font: fontBold, color: PCMG_COLORS.amberText });
+    });
+
+    y -= highH + 9;
+
+    // 3. GRÁFICO VETORIAL DE TÓPICOS DE TREINAMENTO (IDÊNTICO AO buildPrintableChartSvg)
+    const chartBoxH = 228;
+    const chartBottom = y - chartBoxH;
+    page.drawRectangle({
+      x: marginX,
+      y: chartBottom,
+      width: contentWidth,
+      height: chartBoxH,
+      color: PCMG_COLORS.white,
+      borderColor: PCMG_COLORS.slate300,
+      borderWidth: 0.8
+    });
+
+    page.drawText(
+      `GRAFICO DE TOPICOS DE TREINAMENTO - ANO ${params.anoReferencia} (TOTAL DE TREINOS: ${dog.totalTreinosAno})`,
+      { x: marginX + 8, y: y - 13, size: 7.5, font: fontBold, color: PCMG_COLORS.ink }
+    );
+
+    // Legenda no canto superior direito
+    const legendItems = [
+      { lbl: 'Aptidao', color: PCMG_COLORS.emerald700 },
+      { lbl: 'Regular', color: blueBar },
+      { lbl: 'Sugestao', color: PCMG_COLORS.amber600 }
+    ];
+    let legX = pageWidth - marginX - 150;
+    for (const li of legendItems) {
+      page.drawRectangle({ x: legX, y: y - 13.5, width: 6, height: 6, color: li.color });
+      page.drawText(li.lbl, { x: legX + 8, y: y - 13, size: 6.5, font: fontBold, color: PCMG_COLORS.slate600 });
+      legX += fontBold.widthOfTextAtSize(li.lbl, 6.5) + 18;
+    }
+
+    const padL = 28;
+    const padR = 12;
+    const padT = 26;
+    const padB = 56;
+    const plotX = marginX + padL;
+    const plotW = contentWidth - padL - padR;
+    const plotY0 = chartBottom + padB;
+    const plotH = chartBoxH - padT - padB;
+    const maxVal = Math.max(dog.maxCount, 1);
+    const stepCount = Math.min(maxVal, 5);
+
+    for (let s = 0; s <= stepCount; s++) {
+      const val = Math.round((maxVal / stepCount) * s);
+      const gy = plotY0 + (val / maxVal) * plotH;
+      page.drawLine({
+        start: { x: plotX, y: gy },
+        end: { x: plotX + plotW, y: gy },
+        thickness: s === 0 ? 1 : 0.45,
+        color: s === 0 ? PCMG_COLORS.slate400 : PCMG_COLORS.slate200
+      });
+      const vt = String(val);
+      page.drawText(vt, {
+        x: plotX - fontRegular.widthOfTextAtSize(vt, 6.8) - 5,
+        y: gy - 2.2,
+        size: 6.8,
+        font: fontRegular,
+        color: PCMG_COLORS.slate500
+      });
+    }
+
+    if (dog.bars.length > 0) {
+      const slotW = plotW / dog.bars.length;
+      const barW = Math.max(10, Math.min(26, slotW * 0.62));
+
+      dog.bars.forEach((b, idx) => {
+        const cx = plotX + slotW * idx + slotW / 2;
+        const bx = cx - barW / 2;
+        const bh = b.count > 0 ? Math.max(4, (b.count / maxVal) * plotH) : 2;
+        const isApt = dog.maxCount > 0 && b.count === dog.maxCount;
+        const isSug = b.count === dog.minCount;
+        const fill = isApt ? PCMG_COLORS.emerald700 : isSug ? PCMG_COLORS.amber600 : blueBar;
+
+        page.drawRectangle({ x: bx, y: plotY0, width: barW, height: bh, color: fill });
+
+        const cntTxt = String(b.count);
+        page.drawText(cntTxt, {
+          x: cx - fontBold.widthOfTextAtSize(cntTxt, 7.2) / 2,
+          y: plotY0 + bh + 3.5,
+          size: 7.2,
+          font: fontBold,
+          color: PCMG_COLORS.ink
+        });
+
+        // Rótulo do tópico sob o eixo X (quebrado em até 2-3 linhas para máxima legibilidade sem sobreposição)
+        const cleanTopic = sanitizePdfText(b.topico);
+        const topicLines = wrapCellLines(cleanTopic, fontBold, 5.5, Math.max(slotW - 2, 22), 3);
+        topicLines.forEach((tl, tli) => {
+          const tw = fontBold.widthOfTextAtSize(tl, 5.5);
+          const staggerOffset = dog.bars.length > 10 && idx % 2 === 1 ? 14 : 0;
+          page.drawText(tl, {
+            x: cx - tw / 2,
+            y: plotY0 - 9 - staggerOffset - tli * 7,
+            size: 5.5,
+            font: fontBold,
+            color: PCMG_COLORS.slate800
+          });
+        });
+      });
+    }
+
+    y = chartBottom - 9;
+
+    // 4. ANOTAÇÕES DO CONDUTOR DO ANIMAL
+    const notesH = 62;
+    const notesBottom = y - notesH;
+    page.drawRectangle({
+      x: marginX,
+      y: notesBottom,
+      width: contentWidth,
+      height: notesH,
+      color: PCMG_COLORS.slate50,
+      borderColor: PCMG_COLORS.slate300,
+      borderWidth: 0.75
+    });
+    page.drawText('ANOTACOES DO CONDUTOR DO ANIMAL', {
+      x: marginX + 8,
+      y: y - 12,
+      size: 7,
+      font: fontBold,
+      color: PCMG_COLORS.amber700
+    });
+    const updTxt = dog.anotacoesCondutorUpdatedAt
+      ? `Ultima alteracao: ${fmtDateTimeStrBrPdf(dog.anotacoesCondutorUpdatedAt)}`
+      : dog.anotacoesCondutor?.trim()
+      ? 'Ultima alteracao: Data/hora nao registrada'
+      : 'Ultima alteracao: Sem alteracoes';
+    page.drawText(updTxt, {
+      x: pageWidth - marginX - fontRegular.widthOfTextAtSize(updTxt, 6.5) - 8,
+      y: y - 12,
+      size: 6.5,
+      font: fontRegular,
+      color: PCMG_COLORS.slate600
+    });
+
+    page.drawRectangle({
+      x: marginX + 7,
+      y: notesBottom + 6,
+      width: contentWidth - 14,
+      height: 38,
+      color: PCMG_COLORS.white,
+      borderColor: PCMG_COLORS.slate200,
+      borderWidth: 0.6
+    });
+    const notesText = String(dog.anotacoesCondutor || '').trim() || 'Nenhuma anotacao registrada pelo condutor.';
+    const noteLines = wrapCellLines(notesText, fontRegular, 7, contentWidth - 24, 3);
+    noteLines.forEach((nl, li) => {
+      page.drawText(nl, {
+        x: marginX + 12,
+        y: notesBottom + 34 - li * 10,
+        size: 7,
+        font: fontRegular,
+        color: dog.anotacoesCondutor?.trim() ? PCMG_COLORS.slate800 : PCMG_COLORS.slate500
+      });
+    });
+
+    y = notesBottom - 9;
+
+    // 5. PRONTUÁRIO CLÍNICO RESUMIDO (3 COLUNAS: VACINAS | ÚLTIMO ATENDIMENTO MÉDICO | ÚLTIMO MEDICAMENTO)
+    const clinH = Math.max(106, Math.min(136, y - 48));
+    const clinBottom = y - clinH;
+    const col3W = (contentWidth - 12) / 3;
+
+    // Col 1: Vacinas
+    const c1x = marginX;
+    page.drawRectangle({ x: c1x, y: clinBottom, width: col3W, height: clinH, color: PCMG_COLORS.slate50, borderColor: PCMG_COLORS.emeraldBorder, borderWidth: 0.75 });
+    page.drawText('VACINAS', { x: c1x + 7, y: y - 12, size: 7, font: fontBold, color: PCMG_COLORS.emerald700 });
+
+    const ultimaVac = vacinasSorted[0] || null;
+    const vacsComProx = vacinasSorted.filter(v => Boolean(v.proximaDose));
+    const proxVac =
+      vacsComProx.filter(v => String(v.proximaDose) >= todayIso).sort((a, b) => String(a.proximaDose).localeCompare(String(b.proximaDose)))[0] ||
+      vacsComProx.filter(v => String(v.proximaDose) < todayIso).sort((a, b) => String(b.proximaDose).localeCompare(String(a.proximaDose)))[0] ||
+      null;
+    const proxVenc = Boolean(proxVac?.proximaDose && String(proxVac.proximaDose) < todayIso);
+
+    const subH = (clinH - 26) / 2;
+    const v1Bottom = y - 18 - subH;
+    page.drawRectangle({ x: c1x + 6, y: v1Bottom, width: col3W - 12, height: subH, color: PCMG_COLORS.white, borderColor: PCMG_COLORS.slate200, borderWidth: 0.6 });
+    page.drawText('ULTIMA VACINA TOMADA', { x: c1x + 10, y: y - 26, size: 5.6, font: fontBold, color: PCMG_COLORS.slate500 });
+    if (ultimaVac) {
+      page.drawText(fitTextToWidth(ultimaVac.nomeVacina, fontBold, 7, col3W - 20), { x: c1x + 10, y: y - 36, size: 7, font: fontBold, color: PCMG_COLORS.ink });
+      page.drawText(`Data: ${fmtIsoDateBrPdf(ultimaVac.dataAplicacao)}`, { x: c1x + 10, y: y - 45, size: 6.5, font: fontRegular, color: PCMG_COLORS.slate700 });
+    } else {
+      page.drawText('Nenhuma vacina registrada.', { x: c1x + 10, y: y - 37, size: 6.5, font: fontRegular, color: PCMG_COLORS.slate500 });
+    }
+
+    const v2Bottom = clinBottom + 6;
+    page.drawRectangle({
+      x: c1x + 6,
+      y: v2Bottom,
+      width: col3W - 12,
+      height: subH - 2,
+      color: PCMG_COLORS.white,
+      borderColor: proxVenc ? PCMG_COLORS.redBorder : PCMG_COLORS.slate200,
+      borderWidth: 0.6
+    });
+    page.drawText('PROXIMA VACINA', { x: c1x + 10, y: v2Bottom + subH - 10, size: 5.6, font: fontBold, color: PCMG_COLORS.slate500 });
+    if (proxVac) {
+      page.drawText(`${fmtIsoDateBrPdf(proxVac.proximaDose)}${proxVenc ? ' (Vencida)' : ''}`, {
+        x: c1x + 10,
+        y: v2Bottom + subH - 20,
+        size: 7,
+        font: fontBold,
+        color: proxVenc ? PCMG_COLORS.redText : PCMG_COLORS.emerald700
+      });
+      page.drawText(fitTextToWidth(proxVac.nomeVacina, fontRegular, 6.5, col3W - 20), {
+        x: c1x + 10,
+        y: v2Bottom + subH - 29,
+        size: 6.5,
+        font: fontRegular,
+        color: PCMG_COLORS.slate700
+      });
+    } else {
+      page.drawText('Nao agendada.', { x: c1x + 10, y: v2Bottom + subH - 21, size: 6.5, font: fontRegular, color: PCMG_COLORS.slate500 });
+    }
+
+    // Col 2: Último Atendimento Médico
+    const c2x = marginX + col3W + 6;
+    page.drawRectangle({ x: c2x, y: clinBottom, width: col3W, height: clinH, color: PCMG_COLORS.slate50, borderColor: cyanBorder, borderWidth: 0.75 });
+    page.drawText('ULTIMO ATENDIMENTO MEDICO', { x: c2x + 7, y: y - 12, size: 7, font: fontBold, color: cyanTitle });
+    page.drawRectangle({ x: c2x + 6, y: clinBottom + 6, width: col3W - 12, height: clinH - 24, color: PCMG_COLORS.white, borderColor: PCMG_COLORS.slate200, borderWidth: 0.6 });
+    if (dog.ultimoMedico) {
+      const m = dog.ultimoMedico;
+      page.drawText(fitTextToWidth(m.tipoAtendimento, fontBold, 7.2, col3W - 20), { x: c2x + 10, y: y - 28, size: 7.2, font: fontBold, color: PCMG_COLORS.ink });
+      page.drawText(`Data: ${fmtIsoDateBrPdf(m.dataAtendimento)}`, { x: c2x + 10, y: y - 38, size: 6.5, font: fontBold, color: cyanTitle });
+      const medDetails = [
+        m.diagnostico ? `Diag.: ${m.diagnostico}` : '',
+        m.conduta ? `Conduta: ${m.conduta}` : '',
+        m.veterinario ? `Vet.: ${m.veterinario}` : ''
+      ]
+        .filter(Boolean)
+        .join('\n');
+      const mLines = wrapCellLines(medDetails || '-', fontRegular, 6.4, col3W - 20, 5);
+      mLines.forEach((ml, li) => {
+        page.drawText(ml, { x: c2x + 10, y: y - 49 - li * 9, size: 6.4, font: fontRegular, color: PCMG_COLORS.slate700 });
+      });
+    } else {
+      page.drawText('Nenhum atendimento medico registrado.', { x: c2x + 10, y: y - 30, size: 6.6, font: fontRegular, color: PCMG_COLORS.slate500 });
+    }
+
+    // Col 3: Último Registro de Medicamentos
+    const c3x = marginX + (col3W + 6) * 2;
+    page.drawRectangle({ x: c3x, y: clinBottom, width: col3W, height: clinH, color: PCMG_COLORS.slate50, borderColor: PCMG_COLORS.amberBorder, borderWidth: 0.75 });
+    page.drawText('ULTIMO REGISTRO MEDICAMENTOS', { x: c3x + 7, y: y - 12, size: 6.8, font: fontBold, color: PCMG_COLORS.amber700 });
+    page.drawRectangle({ x: c3x + 6, y: clinBottom + 6, width: col3W - 12, height: clinH - 24, color: PCMG_COLORS.white, borderColor: PCMG_COLORS.slate200, borderWidth: 0.6 });
+    if (dog.ultimoMedicamento) {
+      const md = dog.ultimoMedicamento;
+      page.drawText(fitTextToWidth(md.produtoNome, fontBold, 7.2, col3W - 20), { x: c3x + 10, y: y - 28, size: 7.2, font: fontBold, color: PCMG_COLORS.ink });
+      page.drawText(fmtDateTimeStrBrPdf(md.dataHora), { x: c3x + 10, y: y - 38, size: 6.5, font: fontBold, color: PCMG_COLORS.amber700 });
+      const medTxt = [
+        `Qtd.: ${fmtNumBrPdf(md.quantidade)} ${md.unidadeMedida || ''}${md.dosagemAplicada ? ` - Dose: ${md.dosagemAplicada}` : ''}`,
+        md.motivo ? `Motivo: ${md.motivo}` : '',
+        md.responsavelAplicacaoNome ? `Aplicado por: ${md.responsavelAplicacaoNome}` : ''
+      ]
+        .filter(Boolean)
+        .join('\n');
+      const mdLines = wrapCellLines(medTxt, fontRegular, 6.4, col3W - 20, 5);
+      mdLines.forEach((ml, li) => {
+        page.drawText(ml, { x: c3x + 10, y: y - 49 - li * 9, size: 6.4, font: fontRegular, color: PCMG_COLORS.slate700 });
+      });
+    } else {
+      page.drawText('Nenhum medicamento ministrado.', { x: c3x + 10, y: y - 30, size: 6.6, font: fontRegular, color: PCMG_COLORS.slate500 });
+    }
+  }
+
+  drawInstitutionalFooters({
+    doc,
+    marginX,
+    pageWidth,
+    fontMono,
+    fontMonoBold,
+    docCode,
+    emissaoBr,
+    footerLeftText: `Sistema ARMARIA - PCMG | Ficha de Desempenho K9 (${params.mode === 'unidade' ? 'Todos os K9' : 'Condutor'} - Ano ${params.anoReferencia}) - ${params.unidadeLabel}`
+  });
+
+  return Buffer.from(await doc.save());
+}
+
+
 

@@ -395,6 +395,34 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     return `${computedBasePublicUrl}/api/relatorios/sinopse-treinamento`;
   }, [computedBasePublicUrl]);
 
+  const computedDesempenhoIndFisicaUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/desempenho/individual/fisica`;
+  }, [computedBasePublicUrl]);
+
+  const computedDesempenhoIndOperacionalUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/desempenho/individual/operacional`;
+  }, [computedBasePublicUrl]);
+
+  const computedDesempenhoUniFisicaUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/desempenho/unidade/fisica`;
+  }, [computedBasePublicUrl]);
+
+  const computedDesempenhoUniOperacionalUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/desempenho/unidade/operacional`;
+  }, [computedBasePublicUrl]);
+
+  const computedDesempenhoK9CondutorInfoUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/desempenho/k9/condutor-info`;
+  }, [computedBasePublicUrl]);
+
+  const computedDesempenhoK9CondutorUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/desempenho/k9/condutor`;
+  }, [computedBasePublicUrl]);
+
+  const computedDesempenhoK9UnidadeUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/desempenho/k9/unidade`;
+  }, [computedBasePublicUrl]);
+
   const computedTermsUrl = useMemo(() => {
     return `${computedBasePublicUrl}/termos-de-servico`;
   }, [computedBasePublicUrl]);
@@ -1776,6 +1804,13 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                     { key: 'mkRelMat', method: 'POST', label: 'Materiais — Relação por Unidade (JSON: {"unidade":"COE",...})', url: computedRelatorioMateriaisUrl },
                     { key: 'mkRelSinopOp', method: 'POST', label: 'Relatórios — Sinopse Operacional (JSON: {"unidade":"COE","periodo":"ultima_permanencia|essa_semana|esse_mes|mes_passado|esse_ano|informar_periodo","data_inicio":"DD/MM/AAAA","data_fim":"DD/MM/AAAA",...})', url: computedRelatorioSinopseOperacionalUrl },
                     { key: 'mkRelSinopTr', method: 'POST', label: 'Relatórios — Sinopse Treinamento (JSON: {"unidade":"COE","periodo":"ultima_permanencia|essa_semana|esse_mes|mes_passado|esse_ano|informar_periodo","data_inicio":"DD/MM/AAAA","data_fim":"DD/MM/AAAA",...})', url: computedRelatorioSinopseTreinamentoUrl },
+                    { key: 'mkDesIndFis', method: 'POST', label: 'Ficha de Desempenho — Minha Ficha Física (ano atual; JSON: {"unidade":"COE","telefone_usuario":"...","solicitacao_id":"...","data_hora_solicitacao":"..."})', url: computedDesempenhoIndFisicaUrl },
+                    { key: 'mkDesIndOp', method: 'POST', label: 'Ficha de Desempenho — Minha Ficha Operacional (técnico/tático, ano atual)', url: computedDesempenhoIndOperacionalUrl },
+                    { key: 'mkDesUniFis', method: 'POST', label: 'Ficha de Desempenho — Fichas Físicas da Unidade (Pág. 1 resumo marcadores/atividades + 1 policial por página, ano atual)', url: computedDesempenhoUniFisicaUrl },
+                    { key: 'mkDesUniOp', method: 'POST', label: 'Ficha de Desempenho — Fichas Operacionais da Unidade (Pág. 1 resumo marcadores/atividades + 1 policial por página, ano atual)', url: computedDesempenhoUniOperacionalUrl },
+                    { key: 'mkDesK9Info', method: 'POST', label: 'Ficha do K9 (COC) — Verificar K9 vinculado ao condutor (retorna tem_k9_vinculado e botao_condutor_label "Gráfico <nomes>")', url: computedDesempenhoK9CondutorInfoUrl },
+                    { key: 'mkDesK9Cond', method: 'POST', label: 'Ficha do K9 (COC) — PDF Gráfico do(s) K9 do Condutor (ano atual)', url: computedDesempenhoK9CondutorUrl },
+                    { key: 'mkDesK9Uni', method: 'POST', label: 'Ficha do K9 (COC) — PDF Gráfico dos K9 (Pág. 1 Nome/Baia/Condutor + 1 gráfico por animal, ano atual)', url: computedDesempenhoK9UnidadeUrl },
                     { key: 'mkEnviar', method: 'POST', label: 'Enviar mensagem WhatsApp (text/template/buttons/list/document)', url: computedMakeEnviarUrl },
                     { key: 'mkUsuario', method: 'POST', label: 'Consultar policial por telefone (JSON: {"phone":"..."})', url: computedMakeUsuarioUrl },
                     { key: 'mkStatus', method: 'GET', label: 'Validar autenticação e status da integração', url: computedMakeStatusUrl }
