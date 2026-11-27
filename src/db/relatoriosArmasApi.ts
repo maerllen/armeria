@@ -2890,36 +2890,6 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       ]);
 
       const catSlug = categoria === 'FISICO' ? 'fisica' : 'operacional';
-      const catLabelPt = categoria === 'FISICO' ? 'físico' : 'operacional (técnico/tático)';
-
-      if (resultados.length === 0) {
-        const emptyMsg = `Não existem registros de desempenho ${catLabelPt} para você no ano ${anoReferencia}.`;
-        await logSolicitacaoDb(pool, {
-          idRegistro,
-          solicitacaoId,
-          tipoRelatorio: tipoRelatorioDb,
-          unidadeSolicitada: selection.displayName,
-          unidadeCodigo: selection.fileSlug,
-          unidadeIdResolvida: selection.unitIds[0] || null,
-          telefoneUsuario: telefoneDigits,
-          usuario: user,
-          status: 'sem_registros',
-          totalRegistros: 0,
-          dataSolicitacao,
-          ipOrigem: clientIp
-        });
-        return res.status(200).json({
-          sucesso: true,
-          status: 'sem_registros',
-          tipo_relatorio: `ficha_individual_${catSlug}`,
-          categoria,
-          ano_referencia: anoReferencia,
-          unidade: selection.displayName,
-          unidade_codigo: selection.fileSlug,
-          total_registros: 0,
-          mensagem: emptyMsg
-        });
-      }
 
       const geradoEm = new Date();
       const expiraEm = new Date(geradoEm.getTime() + PDF_RETENTION_HOURS * 60 * 60 * 1000);
@@ -2995,6 +2965,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         unidade_codigo: selection.fileSlug,
         solicitacao_id: solicitacaoId,
         total_registros: resultados.length,
+        grafico_vazio: resultados.length === 0,
         arquivo_nome: arquivoNome,
         arquivo_url: arquivoUrl,
         gerado_em: geradoEm.toISOString(),
@@ -3189,34 +3160,6 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       );
 
       const catSlug = categoria === 'FISICO' ? 'fisicas' : 'operacionais';
-      if (usuarios.length === 0 && marcadores.length === 0 && atividades.length === 0) {
-        await logSolicitacaoDb(pool, {
-          idRegistro,
-          solicitacaoId,
-          tipoRelatorio: tipoRelatorioDb,
-          unidadeSolicitada: selection.displayName,
-          unidadeCodigo: selection.fileSlug,
-          unidadeIdResolvida: unitId,
-          telefoneUsuario: telefoneDigits,
-          usuario: user,
-          status: 'sem_registros',
-          totalRegistros: 0,
-          dataSolicitacao,
-          ipOrigem: clientIp
-        });
-        return res.status(200).json({
-          sucesso: true,
-          status: 'sem_registros',
-          tipo_relatorio: `fichas_unidade_${catSlug}`,
-          categoria,
-          ano_referencia: anoReferencia,
-          unidade: selection.displayName,
-          unidade_codigo: selection.fileSlug,
-          total_usuarios: 0,
-          total_registros: 0,
-          mensagem: `Não existem registros de desempenho para a unidade ${selection.displayName} no ano ${anoReferencia}.`
-        });
-      }
 
       const geradoEm = new Date();
       const expiraEm = new Date(geradoEm.getTime() + PDF_RETENTION_HOURS * 60 * 60 * 1000);
@@ -3289,6 +3232,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         total_marcadores: marcadores.length,
         total_atividades: atividades.length,
         total_registros: totalAvaliacoes,
+        grafico_vazio: totalAvaliacoes === 0,
         arquivo_nome: arquivoNome,
         arquivo_url: arquivoUrl,
         gerado_em: geradoEm.toISOString(),
@@ -3446,38 +3390,8 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
           ? await queryK9AnimalsRaw(pool, { condutorUserId: user.id })
           : await queryK9AnimalsRaw(pool, { unitId });
 
-      if (rawDogs.length === 0) {
-        const emptyMsg =
-          mode === 'condutor'
-            ? 'Você não possui nenhum animal K9 vinculado como condutor.'
-            : 'Nenhum animal K9 cadastrado na unidade COC.';
-        await logSolicitacaoDb(pool, {
-          idRegistro,
-          solicitacaoId,
-          tipoRelatorio: tipoRelatorioDb,
-          unidadeSolicitada: selection.displayName,
-          unidadeCodigo: selection.fileSlug,
-          unidadeIdResolvida: unitId || null,
-          telefoneUsuario: telefoneDigits,
-          usuario: user,
-          status: 'sem_registros',
-          totalRegistros: 0,
-          dataSolicitacao,
-          ipOrigem: clientIp
-        });
-        return res.status(200).json({
-          sucesso: true,
-          status: 'sem_registros',
-          tipo_relatorio: mode === 'condutor' ? 'ficha_k9_condutor' : 'ficha_k9_unidade',
-          ano_referencia: anoReferencia,
-          unidade: selection.displayName,
-          unidade_codigo: selection.fileSlug,
-          total_animais: 0,
-          mensagem: emptyMsg
-        });
-      }
-
-      const animaisDossier = await buildK9AnimalDossiersYear(pool, rawDogs, anoReferencia);
+      const animaisDossier =
+        rawDogs.length > 0 ? await buildK9AnimalDossiersYear(pool, rawDogs, anoReferencia) : [];
 
       const geradoEm = new Date();
       const expiraEm = new Date(geradoEm.getTime() + PDF_RETENTION_HOURS * 60 * 60 * 1000);
@@ -3548,6 +3462,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         solicitacao_id: solicitacaoId,
         total_animais: animaisDossier.length,
         nomes_animais: animaisDossier.map(a => a.nome),
+        grafico_vazio: animaisDossier.length === 0 || animaisDossier.every(a => a.totalTreinosAno === 0),
         arquivo_nome: arquivoNome,
         arquivo_url: arquivoUrl,
         gerado_em: geradoEm.toISOString(),

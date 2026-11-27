@@ -5039,39 +5039,6 @@ async function renderSingleUserPerformancePage(opts: {
 
   y = profileBottom - 8;
 
-  // Sem avaliações no ano
-  if (stats.sorted.length === 0) {
-    const emptyBoxH = 62;
-    page.drawRectangle({
-      x: marginX,
-      y: y - emptyBoxH,
-      width: contentWidth,
-      height: emptyBoxH,
-      color: PCMG_COLORS.slate50,
-      borderColor: PCMG_COLORS.slate300,
-      borderWidth: 0.75
-    });
-    const msg1 = `Nenhuma avaliacao de ${catShort.toLowerCase()} registrada no ano ${anoReferencia} para este policial.`;
-    const w1 = fontBold.widthOfTextAtSize(msg1, 9);
-    page.drawText(msg1, {
-      x: marginX + Math.max(8, (contentWidth - w1) / 2),
-      y: y - 28,
-      size: 9,
-      font: fontBold,
-      color: PCMG_COLORS.slate600
-    });
-    const msg2 = 'Quando houver lancamentos salvos na unidade, os graficos e indices aparecerao automaticamente aqui.';
-    const w2 = fontRegular.widthOfTextAtSize(msg2, 7.5);
-    page.drawText(msg2, {
-      x: marginX + Math.max(8, (contentWidth - w2) / 2),
-      y: y - 43,
-      size: 7.5,
-      font: fontRegular,
-      color: PCMG_COLORS.slate500
-    });
-    return;
-  }
-
   // Destaques (Maior Índice & Ponto de Atenção)
   if (stats.bestMarker) {
     const highH = 34;
@@ -5176,6 +5143,27 @@ async function renderSingleUserPerformancePage(opts: {
   };
 
   y = drawMarkerTableHeader(page, y);
+
+  if (stats.markerSummaries.length === 0) {
+    const emptyRowH = 20;
+    page.drawRectangle({
+      x: marginX,
+      y: y - emptyRowH,
+      width: contentWidth,
+      height: emptyRowH,
+      color: PCMG_COLORS.white,
+      borderColor: PCMG_COLORS.slate200,
+      borderWidth: 0.5
+    });
+    page.drawText(`Nenhum indice de ${catShort.toLowerCase()} registrado no ano ${anoReferencia}.`, {
+      x: marginX + 6,
+      y: y - 13,
+      size: 7,
+      font: fontRegular,
+      color: PCMG_COLORS.slate500
+    });
+    y -= emptyRowH;
+  }
 
   const maxMarkersOnStrictPage = singlePageStrict ? Math.min(stats.markerSummaries.length, 9) : stats.markerSummaries.length;
   const rowH = singlePageStrict ? 22 : 25;
@@ -5352,6 +5340,27 @@ async function renderSingleUserPerformancePage(opts: {
 
     y = drawHistHeader(page, y);
     const hRowH = 14.5;
+
+    if (historyList.length === 0) {
+      const emptyHistH = 20;
+      page.drawRectangle({
+        x: marginX,
+        y: y - emptyHistH,
+        width: contentWidth,
+        height: emptyHistH,
+        color: PCMG_COLORS.white,
+        borderColor: PCMG_COLORS.slate200,
+        borderWidth: 0.5
+      });
+      page.drawText(`Nenhum registro encontrado no ano ${anoReferencia}.`, {
+        x: marginX + 6,
+        y: y - 13,
+        size: 7,
+        font: fontRegular,
+        color: PCMG_COLORS.slate500
+      });
+      y -= emptyHistH;
+    }
 
     for (let idx = 0; idx < historyList.length; idx++) {
       if (y - hRowH < 44) {
@@ -5854,6 +5863,27 @@ export async function generateSystemFichaDesempenhoK9Pdf(
 
     y = drawK9TableHeader(summaryPage, y);
 
+    if (params.animais.length === 0) {
+      const emptyRowH = 24;
+      summaryPage.drawRectangle({
+        x: marginX,
+        y: y - emptyRowH,
+        width: contentWidth,
+        height: emptyRowH,
+        color: PCMG_COLORS.white,
+        borderColor: PCMG_COLORS.slate200,
+        borderWidth: 0.5
+      });
+      summaryPage.drawText('Nenhum animal K9 cadastrado na unidade.', {
+        x: marginX + 8,
+        y: y - 15,
+        size: 8,
+        font: fontRegular,
+        color: PCMG_COLORS.slate500
+      });
+      y -= emptyRowH;
+    }
+
     for (let i = 0; i < params.animais.length; i++) {
       const dog = params.animais[i];
       const condLines = wrapCellLines(dog.condutorTexto || 'Nao vinculado', fontRegular, 8, colCondW - 14, 3);
@@ -5899,6 +5929,38 @@ export async function generateSystemFichaDesempenhoK9Pdf(
 
       y = rb;
     }
+  } else if (params.animais.length === 0) {
+    const emptyPage = doc.addPage([pageWidth, pageHeight]);
+    const y = drawCocHeader(emptyPage, `Ficha de Desempenho e Topicos de Treinamento K9 - Ano ${params.anoReferencia}`);
+    const boxH = 74;
+    emptyPage.drawRectangle({
+      x: marginX,
+      y: y - boxH,
+      width: contentWidth,
+      height: boxH,
+      color: PCMG_COLORS.slate50,
+      borderColor: PCMG_COLORS.slate300,
+      borderWidth: 0.75
+    });
+    const m1 = `Nenhum animal K9 vinculado como condutor para ${sanitizePdfText(params.solicitanteNome)}.`;
+    const m1Fit = fitTextToWidth(m1, fontBold, 9, contentWidth - 20);
+    const w1 = fontBold.widthOfTextAtSize(m1Fit, 9);
+    emptyPage.drawText(m1Fit, {
+      x: marginX + Math.max(10, (contentWidth - w1) / 2),
+      y: y - 30,
+      size: 9,
+      font: fontBold,
+      color: PCMG_COLORS.slate700
+    });
+    const m2 = `Ano de referencia: ${params.anoReferencia} | Solicitante MASP: ${sanitizePdfText(params.solicitanteMasp || '-')}`;
+    const w2 = fontRegular.widthOfTextAtSize(m2, 7.5);
+    emptyPage.drawText(m2, {
+      x: marginX + Math.max(10, (contentWidth - w2) / 2),
+      y: y - 48,
+      size: 7.5,
+      font: fontRegular,
+      color: PCMG_COLORS.slate500
+    });
   }
 
   // ---- PÁGINAS INDIVIDUAIS: 1 ANIMAL POR PÁGINA (IDÊNTICO AO "IMPRIMIR GRÁFICO" DA ABA ANIMAIS) ----
@@ -6164,6 +6226,16 @@ export async function generateSystemFichaDesempenhoK9Pdf(
             color: PCMG_COLORS.slate800
           });
         });
+      });
+    } else {
+      const emptyChartMsg = `Nenhum topico de treinamento registrado no ano ${params.anoReferencia}.`;
+      const ew = fontRegular.widthOfTextAtSize(emptyChartMsg, 7.5);
+      page.drawText(emptyChartMsg, {
+        x: plotX + Math.max(8, (plotW - ew) / 2),
+        y: plotY0 + plotH / 2,
+        size: 7.5,
+        font: fontRegular,
+        color: PCMG_COLORS.slate500
       });
     }
 
