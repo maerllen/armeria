@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   User,
   Department,
@@ -31,6 +31,8 @@ import {
   normalizeModoAvaliacao,
   normalizeTempoAprovacaoModo
 } from '../utils/desempenhoScoring';
+import { extractTafPdfFromBuffer, PdfImportSummary } from '../utils/desempenhoPdfImport';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { TopLayerAlert } from './TopLayerAlert';
 import {
   UsuarioDesempenhoDashboard,
@@ -66,7 +68,8 @@ import {
   ChevronRight,
   RefreshCw,
   Award,
-  Printer
+  Printer,
+  FileUp
 } from 'lucide-react';
 
 interface RelatorioDesempenhoUnidadePanelProps {
@@ -278,6 +281,18 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   const [gUserSearch, setGUserSearch] = useState('');
   const [gUserUnitFilter, setGUserUnitFilter] = useState('TODAS');
   const [savingGroup, setSavingGroup] = useState(false);
+
+  // Importação efêmera de PDF no lançamento do grupo (não salva arquivo)
+  const pdfImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [importingPdf, setImportingPdf] = useState(false);
+  const [pdfImportReport, setPdfImportReport] = useState<{
+    groupId: string;
+    fileName: string;
+    matchedUsersCount: number;
+    filledCellsCount: number;
+    unmatchedGroupUsersCount: number;
+    recognizedColumns: string[];
+  } | null>(null);
 
   const notify = (type: 'success' | 'error', message: string) => {
     setAlertState({ type, message });
@@ -1323,6 +1338,204 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     printDocumentInPage(html, docTitle);
   };
 
+  const handleImportGroupPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Limpa imediatamente o input para descartar referência ao arquivo após leitura
+    e.target.value = '';
+    if (!file || !activeGroup || activeGroup.status !== 'ABERTO') return;
+
+    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+      notify('error', 'Selecione um arquivo no formato PDF (.pdf).');
+      return;
+    }
+
+    setImportingPdf(true);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const summary: PdfImportSummary = await extractTafPdfFromBuffer(
+        arrayBuffer,
+        activeGroup.participantes,
+        activeGroup.marcadores,
+        pdfWorkerUrl
+      );
+
+      if (summary.totalTextItems === 0) {
+        notify(
+          'error',
+          'Não foi possível extrair texto deste PDF (o arquivo pode estar escaneado como imagem). Use um PDF digital com texto selecionável.'
+        );
+        return;
+      }
+
+      if (summary.entries.length === 0) {
+        const msg =
+          summary.recognizedColumns.length === 0
+            ? 'Nenhuma coluna de índice compatível com os marcadores deste grupo foi encontrada no PDF. O arquivo foi descartado.'
+            : 'Nenhum policial deste grupo teve resultado identificado nas colunas compatíveis do PDF. O arquivo foi descartado.';
+        notify('error', msg);
+        return;
+      }
+
+      const markersById = new Map<string, DesempenhoMarcador>(
+        activeGroup.marcadores.map(m => [m.id, m])
+      );
+      const usersWithImportedData = new Set<string>();
+
+      setDraftCells(prev => {
+        const next = { ...prev };
+
+        for (const entry of summary.entries) {
+          const m = markersById.get(entry.marcadorId);
+          if (!m) continue;
+
+          const key = `${entry.usuarioId}__${m.id}`;
+          const prevCell: DraftResultCell = next[key] || {
+            valorMarca: '',
+            tempoInput: '',
+            notaObtida: '',
+            resultadoApto: '',
+            tirosEfetuados: '',
+            acertosTiros: '',
+            observacoes: ''
+          };
+          const nextCell: DraftResultCell = { ...prevCell };
+
+          const isAptoMarker = isAptoInaptoMarker(m);
+          const hasAutoDist = Boolean(
+            m.usaDistribuicaoNota &&
+              m.fatorDistribuicao &&
+              m.regrasDistribuicao &&
+              m.regrasDistribuicao.length > 0
+          );
+          const isMixedDriver = hasAutoDist && m.fatorDistribuicao === 'MARCA_TEMPO';
+          const isShotRateDriver = hasAutoDist && m.fatorDistribuicao === 'TIROS_TEMPO';
+          const needsTimeInput = Boolean(m.usaTempo || isShotRateDriver || isMixedDriver);
+
+          if (entry.valorMarca !== undefined) {
+            nextCell.valorMarca = entry.valorMarca;
+            if (entry.tempoInput === undefined && isMixedDriver) {
+              nextCell.tempoInput = '';
+            }
+          }
+
+          if (entry.tempoInput !== undefined) {
+            nextCell.tempoInput = entry.tempoInput;
+            if (entry.valorMarca === undefined && isMixedDriver) {
+              nextCell.valorMarca = '';
+            }
+          }
+
+          if (entry.resultadoApto) {
+            nextCell.resultadoApto = entry.resultadoApto;
+            if (isAptoMarker) {
+              if (!hasAutoDist) {
+                nextCell.notaObtida = entry.resultadoApto === 'APTO' ? '1' : '0';
+              } else if (m.regrasDistribuicao && m.regrasDistribuicao.length > 0) {
+                // Para índices Apto/Inapto com distribuição automática, tenta preencher os campos-guia da faixa correspondente
+                const targetMarcaApto = (entry.natacao50m || entry.resultadoApto) === 'APTO';
+                const targetTempoApto = (entry.flutuacao5m || entry.resultadoApto) === 'APTO';
+
+                if (m.fatorDistribuicao === 'MARCA' || isMixedDriver) {
+                  const marcaTier = m.regrasDistribuicao.find(
+                    t =>
+                      (t.tipo === 'MARCA' || (!t.tipo && !isMixedDriver)) &&
+                      isTierApto(t) === targetMarcaApto
+                  );
+                  if (marcaTier && Number.isFinite(Number(marcaTier.valor))) {
+                    nextCell.valorMarca = String(marcaTier.valor);
+                  }
+                }
+                if (m.fatorDistribuicao === 'TEMPO' || isMixedDriver) {
+                  const tempoTier = m.regrasDistribuicao.find(
+                    t =>
+                      (t.tipo === 'TEMPO' || (!t.tipo && !isMixedDriver)) &&
+                      isTierApto(t) === targetTempoApto
+                  );
+                  const sec =
+                    tempoTier?.tempoSegundos != null
+                      ? Number(tempoTier.tempoSegundos)
+                      : tempoTier?.valor != null
+                      ? Number(tempoTier.valor)
+                      : null;
+                  if (sec !== null && Number.isFinite(sec)) {
+                    nextCell.tempoInput = secondsToInputString(sec, false);
+                  }
+                }
+              }
+            }
+          }
+
+          if (hasAutoDist) {
+            const nextValRaw = nextCell.valorMarca.trim().replace(',', '.');
+            const nextValNum =
+              nextValRaw !== '' && Number.isFinite(Number(nextValRaw)) ? Number(nextValRaw) : null;
+            const nextAcertosRaw = (nextCell.acertosTiros || '').trim().replace(',', '.');
+            const nextAcertosNum =
+              nextAcertosRaw !== '' && Number.isFinite(Number(nextAcertosRaw))
+                ? Number(nextAcertosRaw)
+                : null;
+            const nextTimeSec = needsTimeInput
+              ? parseTimeInputToSeconds(nextCell.tempoInput, isShotRateDriver)
+              : null;
+            const nextDist = calculateDistributedScore(
+              m,
+              nextValNum,
+              nextTimeSec,
+              nextAcertosNum
+            );
+            if (nextDist.hasInput && nextDist.nota !== null) {
+              nextCell.notaObtida = String(nextDist.nota);
+              if (isAptoMarker && nextDist.resultadoApto) {
+                nextCell.resultadoApto = nextDist.resultadoApto;
+              }
+            } else if (isAptoMarker && entry.resultadoApto) {
+              nextCell.resultadoApto = entry.resultadoApto;
+              nextCell.notaObtida = entry.resultadoApto === 'APTO' ? '1' : '0';
+            }
+          }
+
+          next[key] = nextCell;
+          usersWithImportedData.add(entry.usuarioId);
+        }
+
+        return next;
+      });
+
+      if (usersWithImportedData.size > 0) {
+        setParticipantAbsence(prev => {
+          const updated = { ...prev };
+          for (const uid of usersWithImportedData) {
+            if (updated[uid]?.ausente) {
+              updated[uid] = { ausente: false, ausenciaInformada: '' };
+            }
+          }
+          return updated;
+        });
+      }
+
+      setPdfImportReport({
+        groupId: activeGroup.id,
+        fileName: file.name,
+        matchedUsersCount: summary.matchedUsersCount,
+        filledCellsCount: summary.entries.length,
+        unmatchedGroupUsersCount: summary.unmatchedGroupUsersCount,
+        recognizedColumns: summary.recognizedColumns
+      });
+
+      notify(
+        'success',
+        `PDF consultado e descartado: ${summary.entries.length} índice(s) preenchido(s) para ${summary.matchedUsersCount} policial(is). Revise os dados e clique em Salvar Resultados.`
+      );
+    } catch (err: any) {
+      notify(
+        'error',
+        `Erro ao ler o arquivo PDF: ${err?.message || 'verifique se o arquivo é um PDF válido.'}`
+      );
+    } finally {
+      setImportingPdf(false);
+    }
+  };
+
   const filteredGrupos = useMemo(
     () => grupos.filter(g => g.status === groupStatusTab),
     [grupos, groupStatusTab]
@@ -1837,6 +2050,28 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {activeGroup.status === 'ABERTO' && (
+                        <>
+                          <input
+                            ref={pdfImportInputRef}
+                            type="file"
+                            accept="application/pdf,.pdf"
+                            onChange={handleImportGroupPdf}
+                            className="hidden"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => pdfImportInputRef.current?.click()}
+                            disabled={importingPdf}
+                            className="px-3.5 py-2 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 disabled:opacity-50 border border-indigo-500/40 text-indigo-300 text-xs font-extrabold flex items-center space-x-1.5 transition"
+                            title="Importar resultados de uma tabela PDF (o arquivo é apenas consultado e descartado em seguida)"
+                          >
+                            <FileUp className="w-3.5 h-3.5" />
+                            <span>{importingPdf ? 'Lendo PDF...' : 'Importar PDF'}</span>
+                          </button>
+                        </>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => handlePrintGroupResults(activeGroup)}
@@ -1919,6 +2154,35 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       )}
                     </div>
                   </div>
+
+                  {pdfImportReport && pdfImportReport.groupId === activeGroup.id && activeGroup.status === 'ABERTO' && (
+                    <div className="bg-indigo-500/10 border border-indigo-500/35 rounded-xl px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs">
+                      <div className="space-y-0.5 text-indigo-200">
+                        <div className="font-extrabold flex items-center gap-1.5">
+                          <FileUp className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                          <span>
+                            Importação concluída ({pdfImportReport.fileName} — consultado e descartado)
+                          </span>
+                        </div>
+                        <div className="text-[11px] opacity-90">
+                          <strong>{pdfImportReport.filledCellsCount}</strong> índice(s) preenchido(s) para{' '}
+                          <strong>{pdfImportReport.matchedUsersCount}</strong> policial(is) do grupo
+                          {pdfImportReport.unmatchedGroupUsersCount > 0
+                            ? ` (${pdfImportReport.unmatchedGroupUsersCount} policial(is) do grupo não constavam no PDF)`
+                            : ''}
+                          . Revise os valores abaixo e clique em <strong>Salvar Resultados</strong>.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPdfImportReport(null)}
+                        className="p-1 rounded-lg text-indigo-300 hover:bg-indigo-500/20 shrink-0"
+                        title="Fechar aviso"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
 
                   {/* Participantes & Lançamento por Marcador */}
                   <div className="space-y-4">
