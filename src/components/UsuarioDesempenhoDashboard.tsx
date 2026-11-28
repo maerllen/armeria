@@ -299,6 +299,26 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
             items.reduce((s, x) => s + calcPercent(x.notaObtida, x.notaMaxRef), 0) / items.length;
           const approvedCount = items.filter(x => x.aprovado).length;
           const ref = items[0];
+          const scoredItems = items.filter(
+            x =>
+              !x.ausente &&
+              x.modoAvaliacaoRef !== 'APTO_INAPTO' &&
+              x.notaObtida != null &&
+              Number.isFinite(Number(x.notaObtida))
+          );
+          const aptoItems = items.filter(x => !x.ausente && x.modoAvaliacaoRef === 'APTO_INAPTO');
+          const totalObtido =
+            Math.round(scoredItems.reduce((s, x) => s + Number(x.notaObtida || 0), 0) * 100) / 100;
+          const totalMaximo =
+            Math.round(scoredItems.reduce((s, x) => s + Number(x.notaMaxRef || 0), 0) * 100) / 100;
+          const allAbsent = items.length > 0 && items.every(x => x.ausente);
+          const scoreLabel = allAbsent
+            ? 'Ausente'
+            : scoredItems.length > 0 && totalMaximo > 0
+            ? `${formatNumberBr(totalObtido)}/${formatNumberBr(totalMaximo)}`
+            : aptoItems.length > 0
+            ? `${aptoItems.filter(x => x.aprovado).length}/${aptoItems.length} Apto`
+            : null;
           return {
             key: `${ref.dataAvaliacao}-${ref.grupoId}`,
             date: ref.dataAvaliacao,
@@ -309,24 +329,37 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
             subtitle: `${items.length} marcador(es) • ${approvedCount}/${items.length} aprovado(s)`,
             detail: items.map(i => `${i.marcadorNome}: ${formatResultadoResumo(i)}`).join(' | '),
             aprovado: approvedCount === items.length,
-            categoria: ref.categoria
+            categoria: ref.categoria,
+            scoreLabel
           };
         });
     }
 
     const items = filteredResultados.filter(r => (r.marcadorId || r.marcadorNome) === selectedMarkerId);
-    return items.map(r => ({
-      key: r.id,
-      date: r.dataAvaliacao,
-      label: formatDateBr(r.dataAvaliacao),
-      valuePct: Math.round(calcPercent(r.notaObtida, r.notaMaxRef) * 10) / 10,
-      approvalPct: Math.round(calcPercent(r.notaAprovacaoRef, r.notaMaxRef)),
-      title: `${r.marcadorNome} (${r.atividadeNome || r.grupoNome || 'Treinamento'})`,
-      subtitle: formatResultadoResumo(r),
-      detail: r.observacoes || '',
-      aprovado: r.aprovado,
-      categoria: r.categoria
-    }));
+    return items.map(r => {
+      const scoreLabel = r.ausente
+        ? 'Ausente'
+        : r.modoAvaliacaoRef === 'APTO_INAPTO'
+        ? r.aprovado
+          ? 'Apto'
+          : 'Inapto'
+        : r.notaMaxRef > 0
+        ? `${formatNumberBr(r.notaObtida)}/${formatNumberBr(r.notaMaxRef)}`
+        : null;
+      return {
+        key: r.id,
+        date: r.dataAvaliacao,
+        label: formatDateBr(r.dataAvaliacao),
+        valuePct: Math.round(calcPercent(r.notaObtida, r.notaMaxRef) * 10) / 10,
+        approvalPct: Math.round(calcPercent(r.notaAprovacaoRef, r.notaMaxRef)),
+        title: `${r.marcadorNome} (${r.atividadeNome || r.grupoNome || 'Treinamento'})`,
+        subtitle: formatResultadoResumo(r),
+        detail: r.observacoes || '',
+        aprovado: r.aprovado,
+        categoria: r.categoria,
+        scoreLabel
+      };
+    });
   }, [filteredResultados, selectedMarkerId]);
 
   const evolutionDelta = useMemo(() => {
@@ -1018,7 +1051,7 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
                       : curvePoints[curvePoints.length - 1];
                   if (!activePt) return null;
                   return (
-                    <div className="mt-2 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div className="mt-2 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-start justify-between gap-2 text-xs">
                       <div className="min-w-0">
                         <div className="font-bold text-white flex items-center space-x-2">
                           <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
@@ -1031,15 +1064,25 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
                           <div className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">{activePt.detail}</div>
                         )}
                       </div>
-                      <span
-                        className={`px-2.5 py-1 rounded-lg font-extrabold shrink-0 ${
-                          activePt.aprovado
-                            ? 'bg-emerald-500/15 text-emerald-300'
-                            : 'bg-amber-500/15 text-amber-300'
-                        }`}
-                      >
-                        {activePt.valuePct}%
-                      </span>
+                      <div className="flex flex-row sm:flex-col items-center sm:items-end justify-end sm:justify-start gap-1.5 shrink-0">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-lg font-extrabold leading-tight ${
+                            activePt.aprovado
+                              ? 'bg-emerald-500/15 text-emerald-300'
+                              : 'bg-amber-500/15 text-amber-300'
+                          }`}
+                        >
+                          {activePt.valuePct}%
+                        </span>
+                        {activePt.scoreLabel && (
+                          <span
+                            title="Pontuação obtida / máxima"
+                            className="px-2.5 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/35 text-amber-300 font-black leading-tight"
+                          >
+                            {activePt.scoreLabel}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   );
                 })()}

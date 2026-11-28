@@ -15,11 +15,13 @@ import {
   TempoAprovacaoModo,
   FatorDistribuicaoNota,
   ModoAvaliacaoDesempenho,
-  ResultadoAptoInapto
+  ResultadoAptoInapto,
+  getSystemLogo
 } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import { getSafeProfilePhotoUrl } from '../utils/profilePhoto';
+import { buildStandardDocumentTitle, printDocumentInPage, escapeHtmlText } from '../utils/printHelper';
 import {
   calculateDistributedScore,
   computeTierRate,
@@ -63,7 +65,8 @@ import {
   Square,
   ChevronRight,
   RefreshCw,
-  Award
+  Award,
+  Printer
 } from 'lucide-react';
 
 interface RelatorioDesempenhoUnidadePanelProps {
@@ -999,6 +1002,327 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     await loadAll();
   };
 
+  const handlePrintGroupResults = (group: DesempenhoGrupo) => {
+    const issuerUnit = units.find(u => u.id === currentUser.unitId);
+    const issuerDept = departments.find(
+      d => d.id === (issuerUnit?.departmentId || currentUser.departmentId)
+    );
+    const logoUrl = getSystemLogo(issuerUnit, issuerDept);
+    const docTitle = buildStandardDocumentTitle(
+      'RESULTADO DE AVALIAÇÃO DE GRUPO',
+      group.nomeGrupo
+    );
+
+    const groupUnitName = unitNameById(group.unitId);
+    const isOpen = group.status === 'ABERTO';
+
+    let presentesCount = 0;
+    let ausentesCount = 0;
+    let totalAprovadosGeral = 0;
+    let somaPontuacaoGeral = 0;
+    let participantesComNota = 0;
+    let maxPontuacaoAtividade = 0;
+    let hasAnyScoredMarker = false;
+
+    for (const m of group.marcadores) {
+      if (!isAptoInaptoMarker(m)) {
+        hasAnyScoredMarker = true;
+        maxPontuacaoAtividade += Number(m.notaMaxima || 0);
+      }
+    }
+    maxPontuacaoAtividade = Math.round(maxPontuacaoAtividade * 100) / 100;
+
+    const rowsHtml = group.participantes
+      .map((p, idx) => {
+        const absState = participantAbsence[p.usuarioId] || {
+          ausente: false,
+          ausenciaInformada: ''
+        };
+        const isParticipantAbsentOpen = isOpen && absState.ausente;
+
+        let totalPontosRaw = 0;
+        let scoredLaunched = 0;
+        let aptoCount = 0;
+        let inaptoCount = 0;
+        let approvedMarkers = 0;
+        let evaluatedMarkers = 0;
+        let archivedSaved = 0;
+        let archivedAbsent = 0;
+        let absenceNote = '';
+
+        const markerCellsHtml = group.marcadores
+          .map(m => {
+            const isAptoMarker = isAptoInaptoMarker(m);
+
+            if (!isOpen) {
+              const saved = group.resultados.find(
+                r => r.usuarioId === p.usuarioId && r.marcadorId === m.id
+              );
+              if (!saved) {
+                return `<td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;text-align:center;color:#94a3b8;">—</td>`;
+              }
+              archivedSaved += 1;
+              if (saved.ausente) {
+                archivedAbsent += 1;
+                if (!absenceNote && saved.ausenciaInformada != null) {
+                  absenceNote = saved.ausenciaInformada ? 'Informada' : 'Não informada';
+                }
+                return `<td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;text-align:center;color:#e11d48;font-weight:700;">Ausente</td>`;
+              }
+              evaluatedMarkers += 1;
+              if (saved.aprovado) approvedMarkers += 1;
+              const savedIsApto = saved.modoAvaliacaoRef === 'APTO_INAPTO' || isAptoMarker;
+              if (savedIsApto) {
+                if (saved.aprovado) aptoCount += 1;
+                else inaptoCount += 1;
+              } else if (saved.notaObtida != null && Number.isFinite(Number(saved.notaObtida))) {
+                totalPontosRaw += Number(saved.notaObtida);
+                scoredLaunched += 1;
+              }
+              const badgeColor = saved.aprovado ? '#059669' : savedIsApto ? '#e11d48' : '#d97706';
+              return `<td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;text-align:center;">
+                <div style="font-weight:700;color:${badgeColor};">${escapeHtmlText(formatResultadoResumo(saved))}</div>
+              </td>`;
+            }
+
+            // Grupo em aberto: usar os valores atuais da tela (draftCells)
+            if (isParticipantAbsentOpen) {
+              if (!absenceNote && absState.ausenciaInformada) {
+                absenceNote = absState.ausenciaInformada === 'SIM' ? 'Informada' : 'Não informada';
+              }
+              return `<td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;text-align:center;color:#e11d48;font-weight:700;">Ausente</td>`;
+            }
+
+            const cell = draftCells[`${p.usuarioId}__${m.id}`];
+            if (!cell) {
+              return `<td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;text-align:center;color:#94a3b8;">—</td>`;
+            }
+
+            const valRaw = cell.valorMarca.trim().replace(',', '.');
+            const valorMarcaNum =
+              valRaw !== '' && Number.isFinite(Number(valRaw)) ? Number(valRaw) : null;
+            const acertosRaw = (cell.acertosTiros || '').trim().replace(',', '.');
+            const acertosNum =
+              acertosRaw !== '' && Number.isFinite(Number(acertosRaw)) ? Number(acertosRaw) : null;
+            const hasAutoDist = Boolean(
+              m.usaDistribuicaoNota &&
+                m.fatorDistribuicao &&
+                m.regrasDistribuicao &&
+                m.regrasDistribuicao.length > 0
+            );
+            const isMixedDriver = hasAutoDist && m.fatorDistribuicao === 'MARCA_TEMPO';
+            const isShotRateDriver = hasAutoDist && m.fatorDistribuicao === 'TIROS_TEMPO';
+            const needsTimeInput = Boolean(m.usaTempo || isShotRateDriver || isMixedDriver);
+            const timeSec = needsTimeInput
+              ? parseTimeInputToSeconds(cell.tempoInput, isShotRateDriver)
+              : null;
+            const distResult = hasAutoDist
+              ? calculateDistributedScore(m, valorMarcaNum, timeSec, acertosNum)
+              : null;
+
+            const manualNotaNum = Number(cell.notaObtida.replace(',', '.'));
+            const effNota =
+              hasAutoDist && distResult?.hasInput && distResult.nota !== null
+                ? distResult.nota
+                : isAptoMarker
+                ? cell.resultadoApto === 'APTO'
+                  ? 1
+                  : cell.resultadoApto === 'INAPTO'
+                  ? 0
+                  : null
+                : cell.notaObtida.trim() !== '' && Number.isFinite(manualNotaNum)
+                ? manualNotaNum
+                : null;
+
+            if (effNota === null) {
+              return `<td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;text-align:center;color:#94a3b8;">—</td>`;
+            }
+
+            evaluatedMarkers += 1;
+            const isApproved = evaluateDesempenhoApproval(m, effNota, timeSec);
+            if (isApproved) approvedMarkers += 1;
+
+            const parts: string[] = [];
+            if (valorMarcaNum !== null) {
+              parts.push(`${formatNumberBr(valorMarcaNum)} ${m.unidadeMedida || ''}`.trim());
+            }
+            if (timeSec !== null) {
+              parts.push(formatSecondsCompact(timeSec));
+            }
+            if (acertosNum !== null && m.teveTiro) {
+              parts.push(`${formatNumberBr(acertosNum)} acertos`);
+            }
+            if (isAptoMarker) {
+              if (isApproved) aptoCount += 1;
+              else inaptoCount += 1;
+              parts.push(isApproved ? 'Apto' : 'Inapto');
+            } else {
+              totalPontosRaw += effNota;
+              scoredLaunched += 1;
+              parts.push(`${formatNumberBr(effNota)} pts`);
+            }
+            const badgeColor = isApproved ? '#059669' : isAptoMarker ? '#e11d48' : '#d97706';
+            return `<td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;text-align:center;">
+              <div style="font-weight:700;color:${badgeColor};">${escapeHtmlText(parts.join(' • '))}</div>
+            </td>`;
+          })
+          .join('');
+
+        const isAbsentRow =
+          isParticipantAbsentOpen || (!isOpen && archivedSaved > 0 && archivedAbsent === archivedSaved);
+
+        if (isAbsentRow) {
+          ausentesCount += 1;
+        } else {
+          presentesCount += 1;
+          if (evaluatedMarkers > 0 && approvedMarkers === evaluatedMarkers) {
+            totalAprovadosGeral += 1;
+          }
+          if (scoredLaunched > 0) {
+            somaPontuacaoGeral += totalPontosRaw;
+            participantesComNota += 1;
+          }
+        }
+
+        const totalPontos = Math.round(totalPontosRaw * 100) / 100;
+        const scoreCellText = isAbsentRow
+          ? 'Ausente'
+          : hasAnyScoredMarker
+          ? scoredLaunched > 0
+            ? `${formatNumberBr(totalPontos)}/${formatNumberBr(maxPontuacaoAtividade)}`
+            : '—'
+          : aptoCount + inaptoCount > 0
+          ? `${aptoCount} Apto${inaptoCount > 0 ? ` • ${inaptoCount} Inapto` : ''}`
+          : '—';
+
+        const statusLabel = isAbsentRow
+          ? `Ausente${absenceNote ? ` (${absenceNote})` : ''}`
+          : evaluatedMarkers === 0
+          ? 'Pendente'
+          : approvedMarkers === evaluatedMarkers
+          ? hasAnyScoredMarker
+            ? 'Aprovado'
+            : 'Apto'
+          : hasAnyScoredMarker
+          ? 'Abaixo da Meta'
+          : 'Inapto';
+
+        const statusColor = isAbsentRow
+          ? '#e11d48'
+          : evaluatedMarkers === 0
+          ? '#64748b'
+          : approvedMarkers === evaluatedMarkers
+          ? '#059669'
+          : !hasAnyScoredMarker
+          ? '#e11d48'
+          : '#d97706';
+
+        return `
+          <tr>
+            <td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;text-align:center;color:#64748b;font-weight:700;">${idx + 1}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">
+              <div style="font-weight:800;color:#0f172a;">${escapeHtmlText(p.usuarioNome)}</div>
+              <div style="font-size:10px;color:#475569;">
+                MASP ${escapeHtmlText(formatMasp(p.usuarioMasp || '') || '—')} • ${escapeHtmlText(p.usuarioCargo || 'Policial')} • ${escapeHtmlText(p.usuarioUnitName || unitNameById(p.usuarioUnitId))}
+              </div>
+            </td>
+            ${markerCellsHtml}
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:800;color:${isAbsentRow ? '#e11d48' : '#0f172a'};">
+              ${escapeHtmlText(scoreCellText)}
+            </td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:800;color:${statusColor};">
+              ${escapeHtmlText(statusLabel)}
+            </td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    const markerHeadersHtml = group.marcadores
+      .map(m => {
+        const sub = isAptoInaptoMarker(m)
+          ? 'Apto / Inapto'
+          : `Máx. ${formatNumberBr(m.notaMaxima)} pts`;
+        return `<th style="padding:7px 7px;border-bottom:2px solid #cbd5e1;text-align:center;">
+          <div>${escapeHtmlText(m.nome)}</div>
+          <div style="font-size:9px;font-weight:600;color:#64748b;margin-top:2px;">${escapeHtmlText(sub)}</div>
+        </th>`;
+      })
+      .join('');
+
+    const mediaGrupo =
+      hasAnyScoredMarker && participantesComNota > 0
+        ? `${formatNumberBr(Math.round((somaPontuacaoGeral / participantesComNota) * 100) / 100)}/${formatNumberBr(maxPontuacaoAtividade)}`
+        : '—';
+
+    const html = `
+      <style>
+        @page { size: landscape; margin: 12mm; }
+      </style>
+      <div style="font-family:Inter,Arial,sans-serif;color:#0f172a;padding:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0f172a;padding-bottom:10px;margin-bottom:12px;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            ${logoUrl ? `<img src="${escapeHtmlText(logoUrl)}" style="width:52px;height:52px;object-fit:contain;" />` : ''}
+            <div>
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#475569;">Polícia Civil de Minas Gerais</div>
+              <div style="font-size:16px;font-weight:800;color:#0f172a;">RESULTADO DE AVALIAÇÃO — ${escapeHtmlText(group.nomeGrupo.toUpperCase())}</div>
+              <div style="font-size:11px;color:#475569;">${escapeHtmlText(issuerUnit?.name || 'Unidade')}${issuerDept ? ` • ${escapeHtmlText(issuerDept.name)}` : ''}</div>
+            </div>
+          </div>
+          <div style="text-align:right;font-size:11px;color:#475569;">
+            <div><strong>Emitido em:</strong> ${escapeHtmlText(new Date().toLocaleString('pt-BR'))}</div>
+            <div><strong>Emissor:</strong> ${escapeHtmlText(currentUser.name)}${issuerUnit?.name ? ` (${escapeHtmlText(issuerUnit.name)})` : ''}</div>
+          </div>
+        </div>
+
+        <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:10px 14px;margin-bottom:12px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px;font-size:11px;">
+          <div>
+            <div style="color:#64748b;font-weight:600;">ATIVIDADE</div>
+            <div style="font-weight:800;">${escapeHtmlText(group.atividadeNome || group.nomeGrupo)}</div>
+            <div style="font-size:10px;color:#475569;">${group.categoria === 'FISICO' ? 'Treinamento Físico' : 'Técnico / Tático'} • ${escapeHtmlText(group.modoLancamento)}</div>
+          </div>
+          <div>
+            <div style="color:#64748b;font-weight:600;">DATA / HORA PREVISTA</div>
+            <div style="font-weight:700;">${escapeHtmlText(formatDateBr(group.dataPrevista))} ${escapeHtmlText(group.horaPrevista || '')}</div>
+            <div style="font-size:10px;color:#475569;">Unidade: ${escapeHtmlText(groupUnitName)}</div>
+          </div>
+          <div>
+            <div style="color:#64748b;font-weight:600;">STATUS DO GRUPO</div>
+            <div style="font-weight:800;color:${group.status === 'ENCERRADO' ? '#059669' : '#d97706'};">${group.status === 'ENCERRADO' ? 'Encerrado / Arquivado' : 'Em Aberto'}</div>
+            ${group.encerradoPorNome ? `<div style="font-size:10px;color:#475569;">Por ${escapeHtmlText(group.encerradoPorNome)}</div>` : ''}
+          </div>
+          <div>
+            <div style="color:#64748b;font-weight:600;">EFETIVO</div>
+            <div style="font-weight:800;">${group.participantes.length} policial(is)</div>
+            <div style="font-size:10px;color:#475569;">${presentesCount} presente(s) • ${ausentesCount} ausente(s)</div>
+          </div>
+          <div>
+            <div style="color:#64748b;font-weight:600;">DESEMPENHO GERAL</div>
+            <div style="font-weight:800;color:#059669;">${totalAprovadosGeral}/${presentesCount} aprovado(s)</div>
+            ${hasAnyScoredMarker ? `<div style="font-size:10px;color:#475569;">Média: ${escapeHtmlText(mediaGrupo)}</div>` : ''}
+          </div>
+        </div>
+
+        <table style="width:100%;border-collapse:collapse;font-size:11px;">
+          <thead>
+            <tr style="background:#f1f5f9;text-align:left;">
+              <th style="padding:7px 7px;border-bottom:2px solid #cbd5e1;text-align:center;width:32px;">#</th>
+              <th style="padding:7px 8px;border-bottom:2px solid #cbd5e1;">Policial</th>
+              ${markerHeadersHtml}
+              <th style="padding:7px 8px;border-bottom:2px solid #cbd5e1;text-align:center;">Total</th>
+              <th style="padding:7px 8px;border-bottom:2px solid #cbd5e1;text-align:center;">Situação</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="4" style="padding:12px;text-align:center;color:#64748b;">Nenhum participante cadastrado.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    printDocumentInPage(html, docTitle);
+  };
+
   const filteredGrupos = useMemo(
     () => grupos.filter(g => g.status === groupStatusTab),
     [grupos, groupStatusTab]
@@ -1512,76 +1836,88 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       )}
                     </div>
 
-                    {activeGroup.status === 'ABERTO' && (
-                      <div className="flex flex-wrap items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={handleSaveGroupResults}
-                          disabled={savingResults}
-                          className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-extrabold flex items-center space-x-1.5 transition"
-                        >
-                          <Save className="w-3.5 h-3.5" />
-                          <span>{savingResults ? 'Salvando...' : 'Salvar Resultados'}</span>
-                        </button>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handlePrintGroupResults(activeGroup)}
+                        className="px-3.5 py-2 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 text-xs font-extrabold flex items-center space-x-1.5 transition"
+                        title="Imprimir resultado consolidado do grupo"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Imprimir Resultado</span>
+                      </button>
 
-                        {confirmCloseGroupId === activeGroup.id ? (
-                          <div className="flex items-center space-x-1 bg-emerald-950/60 border border-emerald-500/40 rounded-xl px-2 py-1">
-                            <span className="text-[11px] font-bold text-emerald-200 px-1">Arquivar grupo?</span>
-                            <button
-                              type="button"
-                              onClick={() => handleCloseGroup(activeGroup.id)}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 text-[11px] font-extrabold"
-                            >
-                              Sim, Encerrar
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmCloseGroupId(null)}
-                              className="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-bold"
-                            >
-                              Não
-                            </button>
-                          </div>
-                        ) : (
+                      {activeGroup.status === 'ABERTO' && (
+                        <>
                           <button
                             type="button"
-                            onClick={() => setConfirmCloseGroupId(activeGroup.id)}
-                            className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold flex items-center space-x-1.5 transition"
+                            onClick={handleSaveGroupResults}
+                            disabled={savingResults}
+                            className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-extrabold flex items-center space-x-1.5 transition"
                           >
-                            <Archive className="w-3.5 h-3.5" />
-                            <span>Encerrar e Arquivar</span>
+                            <Save className="w-3.5 h-3.5" />
+                            <span>{savingResults ? 'Salvando...' : 'Salvar Resultados'}</span>
                           </button>
-                        )}
 
-                        {confirmDeleteGroupId === activeGroup.id ? (
-                          <div className="flex items-center space-x-1">
+                          {confirmCloseGroupId === activeGroup.id ? (
+                            <div className="flex items-center space-x-1 bg-emerald-950/60 border border-emerald-500/40 rounded-xl px-2 py-1">
+                              <span className="text-[11px] font-bold text-emerald-200 px-1">Arquivar grupo?</span>
+                              <button
+                                type="button"
+                                onClick={() => handleCloseGroup(activeGroup.id)}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 text-[11px] font-extrabold"
+                              >
+                                Sim, Encerrar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmCloseGroupId(null)}
+                                className="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-bold"
+                              >
+                                Não
+                              </button>
+                            </div>
+                          ) : (
                             <button
                               type="button"
-                              onClick={() => handleDeleteGroup(activeGroup.id)}
-                              className="px-2.5 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-bold"
+                              onClick={() => setConfirmCloseGroupId(activeGroup.id)}
+                              className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold flex items-center space-x-1.5 transition"
                             >
-                              Confirmar Exclusão
+                              <Archive className="w-3.5 h-3.5" />
+                              <span>Encerrar e Arquivar</span>
                             </button>
+                          )}
+
+                          {confirmDeleteGroupId === activeGroup.id ? (
+                            <div className="flex items-center space-x-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteGroup(activeGroup.id)}
+                                className="px-2.5 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-bold"
+                              >
+                                Confirmar Exclusão
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteGroupId(null)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs font-bold"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          ) : (
                             <button
                               type="button"
-                              onClick={() => setConfirmDeleteGroupId(null)}
-                              className="px-2 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs font-bold"
+                              onClick={() => setConfirmDeleteGroupId(activeGroup.id)}
+                              className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                              title="Excluir grupo aberto"
                             >
-                              Cancelar
+                              <Trash2 className="w-4 h-4" />
                             </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDeleteGroupId(activeGroup.id)}
-                            className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
-                            title="Excluir grupo aberto"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    )}
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   {/* Participantes & Lançamento por Marcador */}
@@ -1707,7 +2043,14 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                             </div>
 
                             <div
-                              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border ${
+                              title={
+                                isAbsentForSummary
+                                  ? 'Policial ausente'
+                                  : scoredMarkersTotal > 0
+                                  ? 'Pontuação obtida / pontuação máxima da atividade'
+                                  : 'Resultado qualitativo da atividade'
+                              }
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${
                                 isAbsentForSummary
                                   ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
                                   : scoredMarkersTotal > 0
@@ -1722,22 +2065,11 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                               }`}
                             >
                               {isAbsentForSummary ? (
-                                <>
-                                  <span className="text-[10px] font-bold uppercase tracking-wide opacity-80">
-                                    Pontuação:
-                                  </span>
-                                  <span className="text-xs font-extrabold">Ausente</span>
-                                </>
+                                <span className="text-xs font-extrabold">Ausente</span>
                               ) : scoredMarkersTotal > 0 ? (
                                 <>
-                                  <span className="text-[10px] font-bold uppercase tracking-wide opacity-80">
-                                    Pontuação Total:
-                                  </span>
-                                  <span className="text-sm font-black">
-                                    {formatNumberBr(totalPontos)} pts
-                                  </span>
-                                  <span className="text-[11px] font-semibold opacity-75">
-                                    / {formatNumberBr(totalMaxPontos)} pts
+                                  <span className="text-sm font-black tracking-tight">
+                                    {formatNumberBr(totalPontos)}/{formatNumberBr(totalMaxPontos)}
                                   </span>
                                   {aptoMarkersTotal > 0 && (
                                     <span className="text-[10px] font-bold pl-1.5 border-l border-current/25">
@@ -1746,16 +2078,11 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   )}
                                 </>
                               ) : (
-                                <>
-                                  <span className="text-[10px] font-bold uppercase tracking-wide opacity-80">
-                                    Resultado:
-                                  </span>
-                                  <span className="text-xs font-extrabold">
-                                    {aptoCount + inaptoCount > 0
-                                      ? `${aptoCount} Apto${inaptoCount > 0 ? ` • ${inaptoCount} Inapto` : ''}`
-                                      : 'Aguardando lançamento'}
-                                  </span>
-                                </>
+                                <span className="text-xs font-extrabold">
+                                  {aptoCount + inaptoCount > 0
+                                    ? `${aptoCount} Apto${inaptoCount > 0 ? ` • ${inaptoCount} Inapto` : ''}`
+                                    : '—'}
+                                </span>
                               )}
                             </div>
                           </div>
