@@ -1593,17 +1593,170 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       };
                       const isParticipantAbsent = activeGroup.status === 'ABERTO' && absState.ausente;
 
+                      let totalPontosRaw = 0;
+                      let totalMaxPontosRaw = 0;
+                      let scoredMarkersTotal = 0;
+                      let scoredMarkersLaunched = 0;
+                      let aptoMarkersTotal = 0;
+                      let aptoCount = 0;
+                      let inaptoCount = 0;
+                      let archivedSavedCount = 0;
+                      let archivedAbsentCount = 0;
+
+                      for (const m of activeGroup.marcadores) {
+                        const isAptoMarker = isAptoInaptoMarker(m);
+                        if (isAptoMarker) {
+                          aptoMarkersTotal += 1;
+                        } else {
+                          scoredMarkersTotal += 1;
+                          totalMaxPontosRaw += Number(m.notaMaxima || 0);
+                        }
+
+                        if (activeGroup.status === 'ENCERRADO') {
+                          const saved = activeGroup.resultados.find(
+                            r => r.usuarioId === p.usuarioId && r.marcadorId === m.id
+                          );
+                          if (!saved) continue;
+                          archivedSavedCount += 1;
+                          if (saved.ausente) {
+                            archivedAbsentCount += 1;
+                            continue;
+                          }
+                          const savedIsApto = saved.modoAvaliacaoRef === 'APTO_INAPTO' || isAptoMarker;
+                          if (savedIsApto) {
+                            if (saved.aprovado) aptoCount += 1;
+                            else inaptoCount += 1;
+                          } else if (saved.notaObtida != null && Number.isFinite(Number(saved.notaObtida))) {
+                            totalPontosRaw += Number(saved.notaObtida);
+                            scoredMarkersLaunched += 1;
+                          }
+                        } else if (!isParticipantAbsent) {
+                          const cellKey = `${p.usuarioId}__${m.id}`;
+                          const cell = draftCells[cellKey];
+                          if (!cell) continue;
+                          const valRaw = cell.valorMarca.trim().replace(',', '.');
+                          const valorMarcaNum =
+                            valRaw !== '' && Number.isFinite(Number(valRaw)) ? Number(valRaw) : null;
+                          const acertosRaw = (cell.acertosTiros || '').trim().replace(',', '.');
+                          const acertosNum =
+                            acertosRaw !== '' && Number.isFinite(Number(acertosRaw))
+                              ? Number(acertosRaw)
+                              : null;
+                          const hasAutoDist = Boolean(
+                            m.usaDistribuicaoNota &&
+                              m.fatorDistribuicao &&
+                              m.regrasDistribuicao &&
+                              m.regrasDistribuicao.length > 0
+                          );
+                          const isMixedDriver = hasAutoDist && m.fatorDistribuicao === 'MARCA_TEMPO';
+                          const isShotRateDriver = hasAutoDist && m.fatorDistribuicao === 'TIROS_TEMPO';
+                          const needsTimeInput = Boolean(m.usaTempo || isShotRateDriver || isMixedDriver);
+                          const timeSec = needsTimeInput
+                            ? parseTimeInputToSeconds(cell.tempoInput, isShotRateDriver)
+                            : null;
+                          const distResult = hasAutoDist
+                            ? calculateDistributedScore(m, valorMarcaNum, timeSec, acertosNum)
+                            : null;
+
+                          if (isAptoMarker) {
+                            const resolvedApto =
+                              hasAutoDist && distResult?.hasInput && distResult.resultadoApto
+                                ? distResult.resultadoApto
+                                : cell.resultadoApto === 'APTO' || cell.resultadoApto === 'INAPTO'
+                                ? cell.resultadoApto
+                                : null;
+                            if (resolvedApto === 'APTO') aptoCount += 1;
+                            else if (resolvedApto === 'INAPTO') inaptoCount += 1;
+                          } else {
+                            const manualNotaNum = Number(cell.notaObtida.replace(',', '.'));
+                            const effNota =
+                              hasAutoDist && distResult?.hasInput && distResult.nota !== null
+                                ? distResult.nota
+                                : cell.notaObtida.trim() !== '' && Number.isFinite(manualNotaNum)
+                                ? manualNotaNum
+                                : null;
+                            if (effNota !== null) {
+                              totalPontosRaw += effNota;
+                              scoredMarkersLaunched += 1;
+                            }
+                          }
+                        }
+                      }
+
+                      const totalPontos = Math.round(totalPontosRaw * 100) / 100;
+                      const totalMaxPontos = Math.round(totalMaxPontosRaw * 100) / 100;
+                      const isAbsentForSummary =
+                        isParticipantAbsent ||
+                        (activeGroup.status === 'ENCERRADO' &&
+                          archivedSavedCount > 0 &&
+                          archivedAbsentCount === archivedSavedCount);
+
                       return (
                       <div
                         key={p.usuarioId}
                         className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-3"
                       >
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2.5 border-b border-slate-800/80">
-                          <div>
-                            <div className="font-extrabold text-sm text-white">{p.usuarioNome}</div>
-                            <div className="text-[11px] text-slate-400">
-                              MASP {formatMasp(p.usuarioMasp || '') || '—'} • {p.usuarioCargo || 'Policial'} •{' '}
-                              <span className="text-sky-300">{p.usuarioUnitName || unitNameById(p.usuarioUnitId)}</span>
+                          <div className="flex flex-wrap items-center gap-3 sm:gap-5 min-w-0">
+                            <div>
+                              <div className="font-extrabold text-sm text-white">{p.usuarioNome}</div>
+                              <div className="text-[11px] text-slate-400">
+                                MASP {formatMasp(p.usuarioMasp || '') || '—'} • {p.usuarioCargo || 'Policial'} •{' '}
+                                <span className="text-sky-300">{p.usuarioUnitName || unitNameById(p.usuarioUnitId)}</span>
+                              </div>
+                            </div>
+
+                            <div
+                              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border ${
+                                isAbsentForSummary
+                                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                                  : scoredMarkersTotal > 0
+                                  ? scoredMarkersLaunched > 0
+                                    ? 'bg-amber-500/10 border-amber-500/35 text-amber-300'
+                                    : 'bg-slate-900 border-slate-700 text-slate-400'
+                                  : inaptoCount > 0
+                                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                                  : aptoCount > 0
+                                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                  : 'bg-slate-900 border-slate-700 text-slate-400'
+                              }`}
+                            >
+                              {isAbsentForSummary ? (
+                                <>
+                                  <span className="text-[10px] font-bold uppercase tracking-wide opacity-80">
+                                    Pontuação:
+                                  </span>
+                                  <span className="text-xs font-extrabold">Ausente</span>
+                                </>
+                              ) : scoredMarkersTotal > 0 ? (
+                                <>
+                                  <span className="text-[10px] font-bold uppercase tracking-wide opacity-80">
+                                    Pontuação Total:
+                                  </span>
+                                  <span className="text-sm font-black">
+                                    {formatNumberBr(totalPontos)} pts
+                                  </span>
+                                  <span className="text-[11px] font-semibold opacity-75">
+                                    / {formatNumberBr(totalMaxPontos)} pts
+                                  </span>
+                                  {aptoMarkersTotal > 0 && (
+                                    <span className="text-[10px] font-bold pl-1.5 border-l border-current/25">
+                                      {aptoCount}/{aptoMarkersTotal} Apto
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <span className="text-[10px] font-bold uppercase tracking-wide opacity-80">
+                                    Resultado:
+                                  </span>
+                                  <span className="text-xs font-extrabold">
+                                    {aptoCount + inaptoCount > 0
+                                      ? `${aptoCount} Apto${inaptoCount > 0 ? ` • ${inaptoCount} Inapto` : ''}`
+                                      : 'Aguardando lançamento'}
+                                  </span>
+                                </>
+                              )}
                             </div>
                           </div>
 
