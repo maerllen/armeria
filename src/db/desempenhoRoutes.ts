@@ -6,9 +6,13 @@ import {
   DesempenhoDistribuicaoFaixa,
   evaluateDesempenhoApproval,
   FatorDistribuicaoNota,
+  isAptoInaptoMarker,
+  ModoAvaliacaoDesempenho,
   normalizeFatorDistribuicao,
+  normalizeModoAvaliacao,
   normalizeTempoAprovacaoModo,
-  parseRegrasDistribuicao
+  parseRegrasDistribuicao,
+  ResultadoAptoInapto
 } from '../utils/desempenhoScoring';
 
 interface DesempenhoRoutesDeps {
@@ -52,6 +56,7 @@ async function ensureDesempenhoSchema(pool: any): Promise<void> {
     CREATE TABLE IF NOT EXISTS \`DESEMPENHO_MARCADORES\` (
       \`ID_MARCADOR\` VARCHAR(64) NOT NULL,
       \`CATEGORIA\` ENUM('FISICO', 'TATICO') NOT NULL,
+      \`MODO_AVALIACAO\` VARCHAR(20) NOT NULL DEFAULT 'PONTUACAO',
       \`NOME\` VARCHAR(180) NOT NULL,
       \`TIPO_MARCA\` VARCHAR(40) DEFAULT NULL,
       \`UNIDADE_MEDIDA\` VARCHAR(60) DEFAULT NULL,
@@ -188,6 +193,7 @@ async function ensureDesempenhoSchema(pool: any): Promise<void> {
       \`NOTA_MIN_REF\` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
       \`NOTA_MAX_REF\` DECIMAL(10,2) NOT NULL DEFAULT 10.00,
       \`NOTA_APROVACAO_REF\` DECIMAL(10,2) NOT NULL DEFAULT 6.00,
+      \`MODO_AVALIACAO_REF\` VARCHAR(20) NOT NULL DEFAULT 'PONTUACAO',
       \`TEMPO_APROVACAO_REF\` INT DEFAULT NULL,
       \`TEMPO_APROVACAO_MODO_REF\` VARCHAR(20) DEFAULT NULL,
       \`APROVADO\` TINYINT(1) NOT NULL DEFAULT 0,
@@ -283,6 +289,16 @@ async function ensureDesempenhoSchema(pool: any): Promise<void> {
       'DESEMPENHO_RESULTADOS',
       'ACERTOS_TIROS',
       'ALTER TABLE `DESEMPENHO_RESULTADOS` ADD COLUMN `ACERTOS_TIROS` INT DEFAULT NULL AFTER `QUANTIDADE_TIROS_PONTUADOS_REF`'
+    );
+    await ensureColumn(
+      'DESEMPENHO_MARCADORES',
+      'MODO_AVALIACAO',
+      "ALTER TABLE `DESEMPENHO_MARCADORES` ADD COLUMN `MODO_AVALIACAO` VARCHAR(20) NOT NULL DEFAULT 'PONTUACAO' AFTER `CATEGORIA`"
+    );
+    await ensureColumn(
+      'DESEMPENHO_RESULTADOS',
+      'MODO_AVALIACAO_REF',
+      "ALTER TABLE `DESEMPENHO_RESULTADOS` ADD COLUMN `MODO_AVALIACAO_REF` VARCHAR(20) NOT NULL DEFAULT 'PONTUACAO' AFTER `NOTA_APROVACAO_REF`"
     );
     await ensureColumn(
       'DESEMPENHO_RESULTADOS',
@@ -405,6 +421,7 @@ function mapMarcadorRow(row: any) {
   return {
     id: String(row.ID_MARCADOR),
     categoria: String(row.CATEGORIA) as 'FISICO' | 'TATICO',
+    modoAvaliacao: normalizeModoAvaliacao(row.MODO_AVALIACAO),
     nome: String(row.NOME || ''),
     tipoMarca: row.TIPO_MARCA ? String(row.TIPO_MARCA) : null,
     unidadeMedida: row.UNIDADE_MEDIDA ? String(row.UNIDADE_MEDIDA) : null,
@@ -462,6 +479,7 @@ function mapResultadoRow(row: any) {
     notaMinRef: Number(row.NOTA_MIN_REF ?? 0),
     notaMaxRef: Number(row.NOTA_MAX_REF ?? 10),
     notaAprovacaoRef: Number(row.NOTA_APROVACAO_REF ?? 6),
+    modoAvaliacaoRef: normalizeModoAvaliacao(row.MODO_AVALIACAO_REF),
     tempoAprovacaoRef: row.TEMPO_APROVACAO_REF != null ? Number(row.TEMPO_APROVACAO_REF) : null,
     tempoAprovacaoModoRef: row.TEMPO_APROVACAO_MODO_REF
       ? normalizeTempoAprovacaoModo(row.TEMPO_APROVACAO_MODO_REF)
@@ -494,17 +512,30 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
     return { ok: false, error: 'Informe o nome do marcador (máximo 180 caracteres).' };
   }
 
-  const notaMinima = toOptionalFloat(body?.notaMinima);
-  const notaMaxima = toOptionalFloat(body?.notaMaxima);
-  const notaAprovacao = toOptionalFloat(body?.notaAprovacao);
-  if (notaMinima === null || notaMaxima === null || notaAprovacao === null) {
-    return { ok: false, error: 'Informe pontuação/nota mínima, máxima e de aprovação válidas.' };
-  }
-  if (notaMinima < 0 || notaMaxima <= notaMinima) {
-    return { ok: false, error: 'A pontuação/nota máxima deve ser maior que a mínima.' };
-  }
-  if (notaAprovacao < notaMinima || notaAprovacao > notaMaxima) {
-    return { ok: false, error: 'A pontuação/nota de aprovação deve estar entre a mínima e a máxima.' };
+  const rawModoAvaliacao = normalizeModoAvaliacao(body?.modoAvaliacao);
+  const modoAvaliacao: ModoAvaliacaoDesempenho =
+    categoria === 'FISICO' ? rawModoAvaliacao : 'PONTUACAO';
+  const isAptoInapto = modoAvaliacao === 'APTO_INAPTO';
+
+  let notaMinima = 0;
+  let notaMaxima = 1;
+  let notaAprovacao = 1;
+  if (!isAptoInapto) {
+    const nMin = toOptionalFloat(body?.notaMinima);
+    const nMax = toOptionalFloat(body?.notaMaxima);
+    const nAprov = toOptionalFloat(body?.notaAprovacao);
+    if (nMin === null || nMax === null || nAprov === null) {
+      return { ok: false, error: 'Informe pontuação/nota mínima, máxima e de aprovação válidas.' };
+    }
+    if (nMin < 0 || nMax <= nMin) {
+      return { ok: false, error: 'A pontuação/nota máxima deve ser maior que a mínima.' };
+    }
+    if (nAprov < nMin || nAprov > nMax) {
+      return { ok: false, error: 'A pontuação/nota de aprovação deve estar entre a mínima e a máxima.' };
+    }
+    notaMinima = nMin;
+    notaMaxima = nMax;
+    notaAprovacao = nAprov;
   }
 
   const dificuldade = String(body?.dificuldade || '').trim() || 'Médio';
@@ -668,12 +699,32 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
 
     for (let idx = 0; idx < rawRules.length; idx++) {
       const r = rawRules[idx];
-      const pts = toOptionalFloat(r?.pontos);
-      if (pts === null || pts < notaMinima || pts > notaMaxima) {
-        return {
-          ok: false,
-          error: `A pontuação da divisão #${idx + 1} deve estar entre a nota mínima (${notaMinima}) e a máxima (${notaMaxima}).`
-        };
+      let pts: number | null = null;
+      let ruleResultado: ResultadoAptoInapto | undefined = undefined;
+      if (isAptoInapto) {
+        const rawRes = String(r?.resultado || '').trim().toUpperCase();
+        if (rawRes === 'APTO' || rawRes === 'INAPTO') {
+          ruleResultado = rawRes;
+          pts = rawRes === 'APTO' ? 1 : 0;
+        } else {
+          const parsedPts = toOptionalFloat(r?.pontos);
+          if (parsedPts === null || (parsedPts !== 0 && parsedPts !== 1)) {
+            return {
+              ok: false,
+              error: `Selecione Apto ou Inapto na divisão #${idx + 1}.`
+            };
+          }
+          ruleResultado = parsedPts >= 1 ? 'APTO' : 'INAPTO';
+          pts = ruleResultado === 'APTO' ? 1 : 0;
+        }
+      } else {
+        pts = toOptionalFloat(r?.pontos);
+        if (pts === null || pts < notaMinima || pts > notaMaxima) {
+          return {
+            ok: false,
+            error: `A pontuação da divisão #${idx + 1} deve estar entre a nota mínima (${notaMinima}) e a máxima (${notaMaxima}).`
+          };
+        }
       }
 
       if (fatorDistribuicao === 'TIROS_TEMPO') {
@@ -726,14 +777,15 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
         if (seenKeys.has(valKey)) {
           return {
             ok: false,
-            error: `Valor duplicado para ${ruleTipo === 'TEMPO' ? 'Tempo' : 'Marca'} na distribuição de pontuação (divisão #${idx + 1}). Informe valores distintos.`
+            error: `Valor duplicado para ${ruleTipo === 'TEMPO' ? 'Tempo' : 'Marca'} na distribuição (divisão #${idx + 1}). Informe valores distintos.`
           };
         }
         seenKeys.add(valKey);
         regrasDistribuicao.push({
           tipo: ruleTipo,
           valor: Math.round(v * 100) / 100,
-          pontos: Math.round(pts * 100) / 100
+          pontos: Math.round(pts * 100) / 100,
+          ...(ruleResultado ? { resultado: ruleResultado } : {})
         });
       } else {
         const v =
@@ -753,13 +805,14 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
         if (seenKeys.has(valKey)) {
           return {
             ok: false,
-            error: `Valor duplicado na distribuição de pontuação (divisão #${idx + 1}). Informe valores distintos.`
+            error: `Valor duplicado na distribuição (divisão #${idx + 1}). Informe valores distintos.`
           };
         }
         seenKeys.add(valKey);
         regrasDistribuicao.push({
           valor: Math.round(v * 100) / 100,
-          pontos: Math.round(pts * 100) / 100
+          pontos: Math.round(pts * 100) / 100,
+          ...(ruleResultado ? { resultado: ruleResultado } : {})
         });
       }
     }
@@ -768,11 +821,19 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
       // Se todas as faixas forem do mesmo tipo, normaliza o fator automaticamente
       if (hasTempoRule && !hasMarcaRule) {
         fatorDistribuicao = 'TEMPO';
-        regrasDistribuicao = regrasDistribuicao.map(({ valor, pontos }) => ({ valor, pontos }));
+        regrasDistribuicao = regrasDistribuicao.map(({ valor, pontos, resultado }) => ({
+          valor,
+          pontos,
+          ...(resultado ? { resultado } : {})
+        }));
         regrasDistribuicao.sort((a, b) => a.valor - b.valor);
       } else if (hasMarcaRule && !hasTempoRule) {
         fatorDistribuicao = 'MARCA';
-        regrasDistribuicao = regrasDistribuicao.map(({ valor, pontos }) => ({ valor, pontos }));
+        regrasDistribuicao = regrasDistribuicao.map(({ valor, pontos, resultado }) => ({
+          valor,
+          pontos,
+          ...(resultado ? { resultado } : {})
+        }));
         regrasDistribuicao.sort((a, b) => a.valor - b.valor);
       } else {
         regrasDistribuicao.sort(
@@ -791,6 +852,7 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
     ok: true,
     cleaned: {
       categoria,
+      modoAvaliacao,
       nome,
       tipoMarca,
       unidadeMedida,
@@ -891,17 +953,18 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
 
       await pool.query(
         `INSERT INTO DESEMPENHO_MARCADORES (
-          ID_MARCADOR, CATEGORIA, NOME, TIPO_MARCA, UNIDADE_MEDIDA, VALOR_REFERENCIA, USA_TEMPO,
+          ID_MARCADOR, CATEGORIA, MODO_AVALIACAO, NOME, TIPO_MARCA, UNIDADE_MEDIDA, VALOR_REFERENCIA, USA_TEMPO,
           TEMPO_MIN_SEG, TEMPO_MAX_SEG, TEMPO_APROVACAO_SEG, TEMPO_APROVACAO_MODO,
           NOTA_MIN, NOTA_MAX, NOTA_APROVACAO,
           USA_DISTRIBUICAO_NOTA, FATOR_DISTRIBUICAO, REGRAS_DISTRIBUICAO,
           DIFICULDADE,
           TEVE_TIRO, TIPO_ARMA, QUANTIDADE_TIROS, QUANTIDADE_TIROS_PONTUADOS, DESCRICAO,
           DEPARTAMENTO_ID, UNIDADE_ID, CRIADOR_ID, CRIADOR_NOME, ATIVO
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         [
           id,
           c.categoria,
+          c.modoAvaliacao,
           c.nome,
           c.tipoMarca,
           c.unidadeMedida,
@@ -981,7 +1044,7 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
 
       await pool.query(
         `UPDATE DESEMPENHO_MARCADORES SET
-          NOME = ?, TIPO_MARCA = ?, UNIDADE_MEDIDA = ?, VALOR_REFERENCIA = ?, USA_TEMPO = ?,
+          MODO_AVALIACAO = ?, NOME = ?, TIPO_MARCA = ?, UNIDADE_MEDIDA = ?, VALOR_REFERENCIA = ?, USA_TEMPO = ?,
           TEMPO_MIN_SEG = ?, TEMPO_MAX_SEG = ?, TEMPO_APROVACAO_SEG = ?, TEMPO_APROVACAO_MODO = ?,
           NOTA_MIN = ?, NOTA_MAX = ?, NOTA_APROVACAO = ?,
           USA_DISTRIBUICAO_NOTA = ?, FATOR_DISTRIBUICAO = ?, REGRAS_DISTRIBUICAO = ?,
@@ -989,6 +1052,7 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
           TEVE_TIRO = ?, TIPO_ARMA = ?, QUANTIDADE_TIROS = ?, QUANTIDADE_TIROS_PONTUADOS = ?, DESCRICAO = ?
          WHERE ID_MARCADOR = ?`,
         [
+          c.modoAvaliacao,
           c.nome,
           c.tipoMarca,
           c.unidadeMedida,
@@ -1653,9 +1717,11 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
         if (!participant || !marker) continue;
 
         const isAusente = Boolean(item?.ausente);
-        const notaMinRef = Number(marker.NOTA_MIN ?? 0);
-        const notaMaxRef = Number(marker.NOTA_MAX ?? 10);
-        const notaAprovRef = Number(marker.NOTA_APROVACAO ?? 6);
+        const modoAvaliacao = normalizeModoAvaliacao(marker.MODO_AVALIACAO);
+        const isAptoMode = isAptoInaptoMarker({ modoAvaliacao });
+        const notaMinRef = isAptoMode ? 0 : Number(marker.NOTA_MIN ?? 0);
+        const notaMaxRef = isAptoMode ? 1 : Number(marker.NOTA_MAX ?? 10);
+        const notaAprovRef = isAptoMode ? 1 : Number(marker.NOTA_APROVACAO ?? 6);
         const usaTempo = Boolean(Number(marker.USA_TEMPO ?? 1));
         const tempoMinRef = marker.TEMPO_MIN_SEG != null ? Number(marker.TEMPO_MIN_SEG) : null;
         const tempoMaxRef = marker.TEMPO_MAX_SEG != null ? Number(marker.TEMPO_MAX_SEG) : null;
@@ -1674,6 +1740,7 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
         const observacoes = item?.observacoes ? String(item.observacoes).trim().slice(0, 500) : null;
 
         const scoringMarker = {
+          modoAvaliacao,
           usaTempo,
           tempoMinSegundos: tempoMinRef,
           tempoMaxSegundos: tempoMaxRef,
@@ -1738,10 +1805,28 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
               if (dist.achievedRate != null) {
                 taxaAcertoPorSegundo = dist.achievedRate;
               }
+            } else if (isAptoMode) {
+              const rawResApto = String(item?.resultadoApto || '').trim().toUpperCase();
+              if (rawResApto === 'APTO' || rawResApto === 'INAPTO') {
+                clampedNota = rawResApto === 'APTO' ? 1 : 0;
+              } else {
+                const fallbackNota = toOptionalFloat(item?.notaObtida);
+                if (fallbackNota === null) continue;
+                clampedNota = fallbackNota >= 1 ? 1 : 0;
+              }
             } else {
               const fallbackNota = toOptionalFloat(item?.notaObtida);
               if (fallbackNota === null) continue;
               clampedNota = Math.max(notaMinRef, Math.min(notaMaxRef, fallbackNota));
+            }
+          } else if (isAptoMode) {
+            const rawResApto = String(item?.resultadoApto || '').trim().toUpperCase();
+            if (rawResApto === 'APTO' || rawResApto === 'INAPTO') {
+              clampedNota = rawResApto === 'APTO' ? 1 : 0;
+            } else {
+              const notaObtida = toOptionalFloat(item?.notaObtida);
+              if (notaObtida === null) continue;
+              clampedNota = notaObtida >= 1 ? 1 : 0;
             }
           } else {
             const notaObtida = toOptionalFloat(item?.notaObtida);
@@ -1750,6 +1835,9 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
           }
 
           aprovado = evaluateDesempenhoApproval(scoringMarker, clampedNota, tempoSegundos) ? 1 : 0;
+          if (isAptoMode) {
+            clampedNota = aprovado ? 1 : 0;
+          }
         }
 
         const resId = genId('res');
@@ -1760,16 +1848,20 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
             CATEGORIA, MARCADOR_NOME, TIPO_MARCA, UNIDADE_MEDIDA,
             DATA_AVALIACAO, HORA_AVALIACAO,
             VALOR_MARCA, TEMPO_SEGUNDOS, NOTA_OBTIDA,
-            NOTA_MIN_REF, NOTA_MAX_REF, NOTA_APROVACAO_REF, TEMPO_APROVACAO_REF, TEMPO_APROVACAO_MODO_REF,
+            NOTA_MIN_REF, NOTA_MAX_REF, NOTA_APROVACAO_REF, MODO_AVALIACAO_REF, TEMPO_APROVACAO_REF, TEMPO_APROVACAO_MODO_REF,
             APROVADO, AUSENTE, AUSENCIA_INFORMADA,
             TEVE_TIRO, TIPO_ARMA, TIROS_EFETUADOS, QUANTIDADE_TIROS_PONTUADOS_REF, ACERTOS_TIROS, TAXA_ACERTO_POR_SEGUNDO,
             OBSERVACOES,
             LANCADO_POR_ID, LANCADO_POR_NOME
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON DUPLICATE KEY UPDATE
             VALOR_MARCA = VALUES(VALOR_MARCA),
             TEMPO_SEGUNDOS = VALUES(TEMPO_SEGUNDOS),
             NOTA_OBTIDA = VALUES(NOTA_OBTIDA),
+            NOTA_MIN_REF = VALUES(NOTA_MIN_REF),
+            NOTA_MAX_REF = VALUES(NOTA_MAX_REF),
+            NOTA_APROVACAO_REF = VALUES(NOTA_APROVACAO_REF),
+            MODO_AVALIACAO_REF = VALUES(MODO_AVALIACAO_REF),
             TEMPO_APROVACAO_MODO_REF = VALUES(TEMPO_APROVACAO_MODO_REF),
             APROVADO = VALUES(APROVADO),
             AUSENTE = VALUES(AUSENTE),
@@ -1804,6 +1896,7 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
             notaMinRef,
             notaMaxRef,
             notaAprovRef,
+            modoAvaliacao,
             tempoAprovRef,
             usaTempo && tempoAprovRef !== null ? tempoAprovModoRef : null,
             aprovado,

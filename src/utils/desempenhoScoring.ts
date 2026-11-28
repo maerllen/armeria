@@ -1,15 +1,19 @@
 export type TempoAprovacaoModo = 'MENOR_IGUAL' | 'MAIOR_IGUAL';
 export type FatorDistribuicaoNota = 'MARCA' | 'TEMPO' | 'MARCA_TEMPO' | 'ACERTOS' | 'TIROS_TEMPO';
 export type TipoFaixaDistribuicao = 'MARCA' | 'TEMPO';
+export type ModoAvaliacaoDesempenho = 'PONTUACAO' | 'APTO_INAPTO';
+export type ResultadoAptoInapto = 'APTO' | 'INAPTO';
 
 export interface DesempenhoDistribuicaoFaixa {
   tipo?: TipoFaixaDistribuicao; // Usado quando fator === 'MARCA_TEMPO' (faixas de 'TEMPO' e 'MARCA' no mesmo índice físico)
   valor: number; // MARCA: unidade de medida; TEMPO: segundos; ACERTOS: qtd acertos; TIROS_TEMPO: qtd tiros/acertos
   tempoSegundos?: number | null; // Usado quando fator === 'TIROS_TEMPO' (ex.: 2 tiros em 1 segundo -> valor: 2, tempoSegundos: 1)
-  pontos: number; // Pontuação/nota atribuída a esta faixa
+  pontos: number; // Pontuação/nota atribuída a esta faixa (em APTO_INAPTO: 1 = APTO, 0 = INAPTO)
+  resultado?: ResultadoAptoInapto; // Usado quando modoAvaliacao === 'APTO_INAPTO'
 }
 
 export interface DesempenhoScoringMarkerLike {
+  modoAvaliacao?: ModoAvaliacaoDesempenho | string | null;
   usaTempo?: boolean;
   tempoMinSegundos?: number | null;
   tempoMaxSegundos?: number | null;
@@ -29,11 +33,27 @@ export interface DesempenhoScoringMarkerLike {
 export interface DistributedScoreResult {
   hasInput: boolean;
   nota: number | null;
+  resultadoApto?: ResultadoAptoInapto | null;
   matchedTier: DesempenhoDistribuicaoFaixa | null;
   matchedMarcaTier?: DesempenhoDistribuicaoFaixa | null;
   matchedTempoTier?: DesempenhoDistribuicaoFaixa | null;
   belowMinimumTier: boolean;
   achievedRate?: number | null; // Taxa de acertos/tiros por segundo (para TIROS_TEMPO)
+}
+
+export function normalizeModoAvaliacao(val?: string | null): ModoAvaliacaoDesempenho {
+  return String(val || '').trim().toUpperCase() === 'APTO_INAPTO' ? 'APTO_INAPTO' : 'PONTUACAO';
+}
+
+export function isAptoInaptoMarker(marker?: Pick<DesempenhoScoringMarkerLike, 'modoAvaliacao'> | null): boolean {
+  return normalizeModoAvaliacao(marker?.modoAvaliacao) === 'APTO_INAPTO';
+}
+
+export function isTierApto(tier?: DesempenhoDistribuicaoFaixa | null): boolean {
+  if (!tier) return false;
+  if (tier.resultado === 'APTO') return true;
+  if (tier.resultado === 'INAPTO') return false;
+  return Number(tier.pontos) >= 1;
 }
 
 export function normalizeTempoAprovacaoModo(val?: string | null): TempoAprovacaoModo {
@@ -69,7 +89,17 @@ export function parseRegrasDistribuicao(raw: any): DesempenhoDistribuicaoFaixa[]
   const cleaned: DesempenhoDistribuicaoFaixa[] = [];
   for (const item of list) {
     const valor = Number(item?.valor);
-    const pontos = Number(item?.pontos);
+    const rawRes = String(item?.resultado || '').trim().toUpperCase();
+    const parsedResultado: ResultadoAptoInapto | undefined =
+      rawRes === 'APTO' ? 'APTO' : rawRes === 'INAPTO' ? 'INAPTO' : undefined;
+    const pontos =
+      item?.pontos !== undefined && item?.pontos !== null && item?.pontos !== ''
+        ? Number(item.pontos)
+        : parsedResultado === 'APTO'
+        ? 1
+        : parsedResultado === 'INAPTO'
+        ? 0
+        : NaN;
     if (!Number.isFinite(valor) || valor < 0) continue;
     if (!Number.isFinite(pontos) || pontos < 0) continue;
     const rawTempo = item?.tempoSegundos;
@@ -84,7 +114,8 @@ export function parseRegrasDistribuicao(raw: any): DesempenhoDistribuicaoFaixa[]
       ...(parsedTipo ? { tipo: parsedTipo } : {}),
       valor: Math.round(valor * 100) / 100,
       ...(parsedTempo !== null && parsedTempo > 0 ? { tempoSegundos: parsedTempo } : {}),
-      pontos: Math.round(pontos * 100) / 100
+      pontos: Math.round(pontos * 100) / 100,
+      ...(parsedResultado ? { resultado: parsedResultado } : {})
     });
   }
   return cleaned;
@@ -116,15 +147,16 @@ function matchSingleDimensionTier(
 }
 
 /**
- * Calcula a nota automaticamente a partir da tabela de distribuição configurada no marcador.
+ * Calcula a nota (ou aptidão APTO/INAPTO) automaticamente a partir da tabela de distribuição configurada no marcador.
  *
  * Regras de degrau (valor exato ou faixa atingida antes do próximo degrau):
  * - Fator MARCA (Distância / Repetição / Execução): maior valor é melhor.
  *   Ex: 100m = 3 pts, 200m = 4 pts => 199m vale 3 pts, 200m e 201m valem 4 pts. Abaixo de 100m vale notaMinima.
  * - Fator MARCA_TEMPO (Misto — Marca/Repetição + Tempo no mesmo índice físico):
  *   Permite combinar faixas de Tempo e faixas de Marca/Repetição no mesmo índice.
- *   Quando ambos forem informados: se a soma das maiores faixas de Tempo e Marca couber em notaMaxima,
- *   soma os pontos obtidos em cada grupo; caso contrário, aplica a maior pontuação atingida entre os dois grupos.
+ *   No modo PONTUACAO: se a soma das maiores faixas de Tempo e Marca couber em notaMaxima, soma os pontos obtidos;
+ *   caso contrário, aplica a maior pontuação atingida entre os dois grupos.
+ *   No modo APTO_INAPTO: cada dimensão preenchida precisa atingir uma faixa APTO (1 = APTO, 0 = INAPTO).
  * - Fator ACERTOS (Tiros pontuados — Marcador Tático): maior número de acertos é melhor.
  * - Fator TIROS_TEMPO (Distribuição Cruzada — Acertos/Tiros por segundo): maior taxa (acertos / tempoSegundos) é melhor.
  * - Fator TEMPO com modo MENOR_IGUAL (Invertido - ex: Corrida): menor tempo é melhor.
@@ -138,11 +170,13 @@ export function calculateDistributedScore(
 ): DistributedScoreResult {
   const regras = parseRegrasDistribuicao(marker.regrasDistribuicao);
   const fator = normalizeFatorDistribuicao(marker.fatorDistribuicao);
+  const aptoMode = isAptoInaptoMarker(marker);
 
   if (!marker.usaDistribuicaoNota || !fator || regras.length === 0) {
     return {
       hasInput: false,
       nota: null,
+      resultadoApto: null,
       matchedTier: null,
       matchedMarcaTier: null,
       matchedTempoTier: null,
@@ -175,6 +209,7 @@ export function calculateDistributedScore(
       return {
         hasInput: false,
         nota: null,
+        resultadoApto: null,
         matchedTier: null,
         matchedMarcaTier: null,
         matchedTempoTier: null,
@@ -191,10 +226,28 @@ export function calculateDistributedScore(
       ? matchSingleDimensionTier(marcaTiers, valorMarca!, false)
       : null;
 
+    if (aptoMode) {
+      const tempoOk = !hasTempoInput || isTierApto(matchedTempoTier);
+      const marcaOk = !hasMarcaInput || isTierApto(matchedMarcaTier);
+      const isApto = tempoOk && marcaOk;
+      const primaryTier = matchedMarcaTier || matchedTempoTier || null;
+      return {
+        hasInput: true,
+        nota: isApto ? 1 : 0,
+        resultadoApto: isApto ? 'APTO' : 'INAPTO',
+        matchedTier: primaryTier,
+        matchedMarcaTier,
+        matchedTempoTier,
+        belowMinimumTier: !matchedTempoTier && !matchedMarcaTier,
+        achievedRate: null
+      };
+    }
+
     if (!matchedTempoTier && !matchedMarcaTier) {
       return {
         hasInput: true,
         nota: clampNota(marker.notaMinima),
+        resultadoApto: null,
         matchedTier: null,
         matchedMarcaTier: null,
         matchedTempoTier: null,
@@ -215,6 +268,7 @@ export function calculateDistributedScore(
       return {
         hasInput: true,
         nota: combinedNota,
+        resultadoApto: null,
         matchedTier: primaryTier,
         matchedMarcaTier,
         matchedTempoTier,
@@ -227,6 +281,7 @@ export function calculateDistributedScore(
     return {
       hasInput: true,
       nota: clampNota(singleMatched.pontos),
+      resultadoApto: null,
       matchedTier: singleMatched,
       matchedMarcaTier,
       matchedTempoTier,
@@ -320,7 +375,14 @@ export function calculateDistributedScore(
 
   const inputValue = fator === 'TEMPO' ? tempoSegundos : valorMarca;
   if (inputValue === undefined || inputValue === null || !Number.isFinite(inputValue)) {
-    return { hasInput: false, nota: null, matchedTier: null, belowMinimumTier: false, achievedRate: null };
+    return {
+      hasInput: false,
+      nota: null,
+      resultadoApto: null,
+      matchedTier: null,
+      belowMinimumTier: false,
+      achievedRate: null
+    };
   }
 
   const tempoModo = normalizeTempoAprovacaoModo(marker.tempoAprovacaoModo);
@@ -330,10 +392,23 @@ export function calculateDistributedScore(
     fator === 'TEMPO' && tempoModo === 'MENOR_IGUAL'
   );
 
+  if (aptoMode) {
+    const isApto = isTierApto(matched);
+    return {
+      hasInput: true,
+      nota: isApto ? 1 : 0,
+      resultadoApto: isApto ? 'APTO' : 'INAPTO',
+      matchedTier: matched,
+      belowMinimumTier: !matched,
+      achievedRate: null
+    };
+  }
+
   if (!matched) {
     return {
       hasInput: true,
       nota: clampNota(marker.notaMinima),
+      resultadoApto: null,
       matchedTier: null,
       belowMinimumTier: true,
       achievedRate: null
@@ -343,6 +418,7 @@ export function calculateDistributedScore(
   return {
     hasInput: true,
     nota: clampNota(matched.pontos),
+    resultadoApto: null,
     matchedTier: matched,
     belowMinimumTier: false,
     achievedRate: null

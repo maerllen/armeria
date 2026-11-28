@@ -2398,18 +2398,22 @@ export type StatusGrupoDesempenho = 'ABERTO' | 'ENCERRADO';
 export type TempoAprovacaoModo = 'MENOR_IGUAL' | 'MAIOR_IGUAL';
 export type FatorDistribuicaoNota = 'MARCA' | 'TEMPO' | 'MARCA_TEMPO' | 'ACERTOS' | 'TIROS_TEMPO';
 export type TipoFaixaDistribuicao = 'MARCA' | 'TEMPO';
+export type ModoAvaliacaoDesempenho = 'PONTUACAO' | 'APTO_INAPTO';
+export type ResultadoAptoInapto = 'APTO' | 'INAPTO';
 
 export interface DesempenhoDistribuicaoFaixa {
   tipo?: TipoFaixaDistribuicao; // Usado em MARCA_TEMPO para combinar faixas de Tempo e Repetição/Marca no mesmo índice
   valor: number; // MARCA: unidade de medida; TEMPO: segundos; ACERTOS: qtd acertos; TIROS_TEMPO: qtd tiros/acertos
   tempoSegundos?: number | null; // Usado em TIROS_TEMPO (ex: 2 tiros em 1 segundo -> valor: 2, tempoSegundos: 1)
-  pontos: number; // Pontuação/nota correspondente à faixa
+  pontos: number; // Pontuação/nota correspondente à faixa (em APTO_INAPTO: 1 = APTO, 0 = INAPTO)
+  resultado?: ResultadoAptoInapto; // Usado quando modoAvaliacao === 'APTO_INAPTO'
 }
 
 export interface DesempenhoMarcador {
   id: string;
   categoria: CategoriaDesempenho;
   nome: string;
+  modoAvaliacao?: ModoAvaliacaoDesempenho; // 'PONTUACAO' (padrão) ou 'APTO_INAPTO' (sem pontuação numérica, para FISICO)
   tipoMarca?: TipoMarcaFisica | null; // Obrigatório para FISICO: Execução, Repetição, Distância
   unidadeMedida?: string | null; // Ex: flexões, metros, execuções, pontos
   valorReferencia?: number | null; // Ex: 1000 (metros) — opcional
@@ -2421,8 +2425,8 @@ export interface DesempenhoMarcador {
   notaMinima: number;
   notaMaxima: number;
   notaAprovacao: number;
-  usaDistribuicaoNota?: boolean; // Habilita cálculo automático de nota por faixas/divisões
-  fatorDistribuicao?: FatorDistribuicaoNota | null; // 'MARCA', 'TEMPO', 'ACERTOS' ou 'TIROS_TEMPO'
+  usaDistribuicaoNota?: boolean; // Habilita cálculo automático de nota/aptidão por faixas/divisões
+  fatorDistribuicao?: FatorDistribuicaoNota | null; // 'MARCA', 'TEMPO', 'MARCA_TEMPO', 'ACERTOS' ou 'TIROS_TEMPO'
   regrasDistribuicao?: DesempenhoDistribuicaoFaixa[];
   dificuldade: DificuldadeDesempenho | string;
   teveTiro: boolean; // Para TATICO
@@ -2491,6 +2495,7 @@ export interface DesempenhoResultado {
   notaMaxRef: number;
   notaMinRef?: number;
   notaAprovacaoRef: number;
+  modoAvaliacaoRef?: ModoAvaliacaoDesempenho;
   tempoAprovacaoRef?: number | null;
   tempoAprovacaoModoRef?: TempoAprovacaoModo | null;
   aprovado: boolean;

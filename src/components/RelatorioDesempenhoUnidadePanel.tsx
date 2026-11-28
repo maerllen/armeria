@@ -13,7 +13,9 @@ import {
   DesempenhoGrupo,
   DesempenhoResultado,
   TempoAprovacaoModo,
-  FatorDistribuicaoNota
+  FatorDistribuicaoNota,
+  ModoAvaliacaoDesempenho,
+  ResultadoAptoInapto
 } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
@@ -22,6 +24,9 @@ import {
   calculateDistributedScore,
   computeTierRate,
   evaluateDesempenhoApproval,
+  isAptoInaptoMarker,
+  isTierApto,
+  normalizeModoAvaliacao,
   normalizeTempoAprovacaoModo
 } from '../utils/desempenhoScoring';
 import { TopLayerAlert } from './TopLayerAlert';
@@ -120,6 +125,7 @@ interface DraftResultCell {
   valorMarca: string;
   tempoInput: string;
   notaObtida: string;
+  resultadoApto: '' | ResultadoAptoInapto;
   tirosEfetuados: string;
   acertosTiros: string;
   observacoes: string;
@@ -135,6 +141,7 @@ interface DraftDistributionTier {
   valor: string;
   tempoSegundos: string;
   pontos: string;
+  resultado: ResultadoAptoInapto;
 }
 
 export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidadePanelProps> = ({
@@ -221,6 +228,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   const [markerModalOpen, setMarkerModalOpen] = useState(false);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
   const [mCategoria, setMCategoria] = useState<CategoriaDesempenho>('FISICO');
+  const [mModoAvaliacao, setMModoAvaliacao] = useState<ModoAvaliacaoDesempenho>('PONTUACAO');
   const [mNome, setMNome] = useState('');
   const [mTipoMarca, setMTipoMarca] = useState<TipoMarcaFisica>('Repetição');
   const [mUnidadeMedida, setMUnidadeMedida] = useState('repetições');
@@ -236,7 +244,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   const [mUsaDistribuicao, setMUsaDistribuicao] = useState(false);
   const [mFatorDistribuicao, setMFatorDistribuicao] = useState<FatorDistribuicaoNota>('MARCA');
   const [mRegrasDistribuicao, setMRegrasDistribuicao] = useState<DraftDistributionTier[]>([
-    { tipo: 'MARCA', valor: '', tempoSegundos: '1', pontos: '' }
+    { tipo: 'MARCA', valor: '', tempoSegundos: '1', pontos: '', resultado: 'APTO' }
   ]);
   const [mDificuldade, setMDificuldade] = useState<DificuldadeDesempenho>('Médio');
   const [mTeveTiro, setMTeveTiro] = useState(false);
@@ -385,6 +393,12 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
             existing && !existing.ausente && existing.notaObtida !== undefined && existing.notaObtida !== null
               ? String(existing.notaObtida)
               : '',
+          resultadoApto:
+            existing && !existing.ausente && isAptoInaptoMarker(m)
+              ? existing.aprovado
+                ? 'APTO'
+                : 'INAPTO'
+              : '',
           tirosEfetuados:
             existing?.tirosEfetuados !== undefined && existing?.tirosEfetuados !== null
               ? String(existing.tirosEfetuados)
@@ -407,6 +421,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   const openCreateMarkerModal = (categoria: CategoriaDesempenho) => {
     setEditingMarkerId(null);
     setMCategoria(categoria);
+    setMModoAvaliacao('PONTUACAO');
     setMNome('');
     setMTipoMarca('Repetição');
     setMUnidadeMedida(categoria === 'FISICO' ? 'repetições' : 'pontos');
@@ -421,7 +436,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     setMNotaAprov('6');
     setMUsaDistribuicao(false);
     setMFatorDistribuicao(categoria === 'FISICO' ? 'MARCA' : 'ACERTOS');
-    setMRegrasDistribuicao([{ tipo: 'MARCA', valor: '', tempoSegundos: '1', pontos: '' }]);
+    setMRegrasDistribuicao([{ tipo: 'MARCA', valor: '', tempoSegundos: '1', pontos: '', resultado: 'APTO' }]);
     setMDificuldade('Médio');
     setMTeveTiro(false);
     setMTipoArma('Pistola');
@@ -434,6 +449,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   const openEditMarkerModal = (m: DesempenhoMarcador) => {
     setEditingMarkerId(m.id);
     setMCategoria(m.categoria);
+    setMModoAvaliacao(m.categoria === 'FISICO' ? normalizeModoAvaliacao(m.modoAvaliacao) : 'PONTUACAO');
     setMNome(m.nome);
     setMTipoMarca((m.tipoMarca as TipoMarcaFisica) || 'Repetição');
     setMUnidadeMedida(m.unidadeMedida || (m.categoria === 'FISICO' ? 'repetições' : 'pontos'));
@@ -443,9 +459,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     setMTempoMax(secondsToInputString(m.tempoMaxSegundos));
     setMTempoAprov(secondsToInputString(m.tempoAprovacaoSegundos));
     setMTempoAprovModo(normalizeTempoAprovacaoModo(m.tempoAprovacaoModo));
-    setMNotaMin(String(m.notaMinima));
-    setMNotaMax(String(m.notaMaxima));
-    setMNotaAprov(String(m.notaAprovacao));
+    setMNotaMin(isAptoInaptoMarker(m) ? '0' : String(m.notaMinima));
+    setMNotaMax(isAptoInaptoMarker(m) ? '10' : String(m.notaMaxima));
+    setMNotaAprov(isAptoInaptoMarker(m) ? '6' : String(m.notaAprovacao));
     const hasDist = Boolean(m.usaDistribuicaoNota && m.regrasDistribuicao && m.regrasDistribuicao.length > 0);
     const defaultFator: FatorDistribuicaoNota =
       m.categoria === 'FISICO' ? 'MARCA' : m.teveTiro ? 'ACERTOS' : 'TEMPO';
@@ -463,14 +479,16 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                   ? 'TEMPO'
                   : 'MARCA'
                 : 'MARCA';
+            const rowRes: ResultadoAptoInapto = isTierApto(r) ? 'APTO' : 'INAPTO';
             return {
               tipo: rowTipo,
               valor: rowTipo === 'TEMPO' ? secondsToInputString(r.valor) : String(r.valor),
               tempoSegundos: r.tempoSegundos != null ? String(r.tempoSegundos).replace('.', ',') : '1',
-              pontos: String(r.pontos)
+              pontos: String(r.pontos),
+              resultado: rowRes
             };
           })
-        : [{ tipo: fator === 'TEMPO' ? 'TEMPO' : 'MARCA', valor: '', tempoSegundos: '1', pontos: '' }]
+        : [{ tipo: fator === 'TEMPO' ? 'TEMPO' : 'MARCA', valor: '', tempoSegundos: '1', pontos: '', resultado: 'APTO' }]
     );
     setMDificuldade((m.dificuldade as DificuldadeDesempenho) || 'Médio');
     setMTeveTiro(m.teveTiro);
@@ -496,7 +514,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       if (prev.length === count) return prev;
       if (prev.length > count) return prev.slice(0, count);
       const next = [...prev];
-      while (next.length < count) next.push({ tipo: defaultTipo, valor: '', tempoSegundos: '1', pontos: '' });
+      while (next.length < count) {
+        next.push({ tipo: defaultTipo, valor: '', tempoSegundos: '1', pontos: '', resultado: 'APTO' });
+      }
       return next;
     });
   };
@@ -546,10 +566,17 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       }
     }
 
+    const isAptoInapto = mCategoria === 'FISICO' && mModoAvaliacao === 'APTO_INAPTO';
     const canDistribute = mCategoria === 'FISICO' || (mCategoria === 'TATICO' && (mTeveTiro || mUsaTempo));
     let resolvedFatorDist: FatorDistribuicaoNota | null =
       canDistribute && mUsaDistribuicao ? mFatorDistribuicao : null;
-    let regrasParsed: Array<{ tipo?: 'MARCA' | 'TEMPO'; valor: number; tempoSegundos?: number; pontos: number }> = [];
+    let regrasParsed: Array<{
+      tipo?: 'MARCA' | 'TEMPO';
+      valor: number;
+      tempoSegundos?: number;
+      pontos: number;
+      resultado?: ResultadoAptoInapto;
+    }> = [];
     if (canDistribute && mUsaDistribuicao) {
       if (mCategoria === 'FISICO') {
         const hasTempoRows = mRegrasDistribuicao.some(r => r.tipo === 'TEMPO');
@@ -564,7 +591,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       }
 
       if ((resolvedFatorDist === 'TEMPO' || resolvedFatorDist === 'MARCA_TEMPO') && !mUsaTempo) {
-        notify('error', 'Ative o controle de tempo para distribuir pontuação contabilizando tempo.');
+        notify('error', 'Ative o controle de tempo para distribuir critérios contabilizando tempo.');
         return;
       }
       if ((resolvedFatorDist === 'ACERTOS' || resolvedFatorDist === 'TIROS_TEMPO') && !(mCategoria === 'TATICO' && mTeveTiro)) {
@@ -580,17 +607,24 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
           : row.valor.trim() !== '' && Number.isFinite(Number(row.valor.trim().replace(',', '.')))
           ? Number(row.valor.trim().replace(',', '.'))
           : null;
-        const pts =
-          row.pontos.trim() !== '' && Number.isFinite(Number(row.pontos.trim().replace(',', '.')))
-            ? Number(row.pontos.trim().replace(',', '.'))
-            : null;
         if (v === null || v < 0 || (resolvedFatorDist === 'TIROS_TEMPO' && v <= 0)) {
-          notify('error', `Informe um valor válido na divisão #${i + 1} da distribuição de pontuação.`);
+          notify('error', `Informe um valor válido na divisão #${i + 1} da distribuição.`);
           return;
         }
-        if (pts === null || pts < 0) {
-          notify('error', `Informe uma pontuação válida na divisão #${i + 1}.`);
-          return;
+        let pts: number | null = null;
+        let rowResultado: ResultadoAptoInapto | undefined = undefined;
+        if (isAptoInapto) {
+          rowResultado = row.resultado === 'INAPTO' ? 'INAPTO' : 'APTO';
+          pts = rowResultado === 'APTO' ? 1 : 0;
+        } else {
+          pts =
+            row.pontos.trim() !== '' && Number.isFinite(Number(row.pontos.trim().replace(',', '.')))
+              ? Number(row.pontos.trim().replace(',', '.'))
+              : null;
+          if (pts === null || pts < 0) {
+            notify('error', `Informe uma pontuação válida na divisão #${i + 1}.`);
+            return;
+          }
         }
         if (resolvedFatorDist === 'TIROS_TEMPO') {
           const tSec =
@@ -603,19 +637,29 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
           }
           regrasParsed.push({ valor: v, tempoSegundos: tSec, pontos: pts });
         } else if (resolvedFatorDist === 'MARCA_TEMPO') {
-          regrasParsed.push({ tipo: row.tipo === 'TEMPO' ? 'TEMPO' : 'MARCA', valor: v, pontos: pts });
+          regrasParsed.push({
+            tipo: row.tipo === 'TEMPO' ? 'TEMPO' : 'MARCA',
+            valor: v,
+            pontos: pts,
+            ...(rowResultado ? { resultado: rowResultado } : {})
+          });
         } else {
-          regrasParsed.push({ valor: v, pontos: pts });
+          regrasParsed.push({
+            valor: v,
+            pontos: pts,
+            ...(rowResultado ? { resultado: rowResultado } : {})
+          });
         }
       }
       if (regrasParsed.length === 0) {
-        notify('error', 'Adicione ao menos uma divisão para distribuir a pontuação.');
+        notify('error', 'Adicione ao menos uma divisão na distribuição.');
         return;
       }
     }
 
     const payload: Partial<DesempenhoMarcador> = {
       categoria: mCategoria,
+      modoAvaliacao: isAptoInapto ? 'APTO_INAPTO' : 'PONTUACAO',
       nome: mNome.trim(),
       tipoMarca: mCategoria === 'FISICO' ? mTipoMarca : null,
       unidadeMedida: mUnidadeMedida.trim() || null,
@@ -625,9 +669,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       tempoMaxSegundos: mUsaTempo ? parseTimeInputToSeconds(mTempoMax) : null,
       tempoAprovacaoSegundos: mUsaTempo ? parseTimeInputToSeconds(mTempoAprov) : null,
       tempoAprovacaoModo: mUsaTempo ? mTempoAprovModo : 'MENOR_IGUAL',
-      notaMinima: Number(mNotaMin.replace(',', '.')),
-      notaMaxima: Number(mNotaMax.replace(',', '.')),
-      notaAprovacao: Number(mNotaAprov.replace(',', '.')),
+      notaMinima: isAptoInapto ? 0 : Number(mNotaMin.replace(',', '.')),
+      notaMaxima: isAptoInapto ? 1 : Number(mNotaMax.replace(',', '.')),
+      notaAprovacao: isAptoInapto ? 1 : Number(mNotaAprov.replace(',', '.')),
       usaDistribuicaoNota: canDistribute ? mUsaDistribuicao : false,
       fatorDistribuicao: canDistribute && mUsaDistribuicao ? resolvedFatorDist : null,
       regrasDistribuicao: canDistribute && mUsaDistribuicao ? regrasParsed : [],
@@ -816,6 +860,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       valorMarca?: number | null;
       tempoSegundos?: number | null;
       notaObtida: number;
+      resultadoApto?: ResultadoAptoInapto | null;
       ausente?: boolean;
       ausenciaInformada?: boolean | null;
       tirosEfetuados?: number | null;
@@ -840,6 +885,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
             valorMarca: null,
             tempoSegundos: null,
             notaObtida: 0,
+            resultadoApto: null,
             ausente: true,
             ausenciaInformada: informedBool,
             tirosEfetuados: null,
@@ -854,6 +900,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
         const key = `${p.usuarioId}__${m.id}`;
         const cell = draftCells[key];
         if (!cell) continue;
+        const isAptoMarker = isAptoInaptoMarker(m);
         const valRaw = cell.valorMarca.trim().replace(',', '.');
         const valorMarca = valRaw !== '' && Number.isFinite(Number(valRaw)) ? Number(valRaw) : null;
         const isShotRateMode = m.usaDistribuicaoNota && m.fatorDistribuicao === 'TIROS_TEMPO';
@@ -867,6 +914,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
             : null;
 
         let notaNum: number | null = null;
+        let resultadoAptoVal: ResultadoAptoInapto | null = null;
         const hasAutoDist = Boolean(
           m.usaDistribuicaoNota && m.fatorDistribuicao && m.regrasDistribuicao && m.regrasDistribuicao.length > 0
         );
@@ -874,14 +922,23 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
           const dist = calculateDistributedScore(m, valorMarca, tempoSegundos, acertosTiros);
           if (dist.hasInput && dist.nota !== null) {
             notaNum = dist.nota;
+            if (isAptoMarker) {
+              resultadoAptoVal = dist.resultadoApto || (dist.nota >= 1 ? 'APTO' : 'INAPTO');
+            }
           }
         }
         if (notaNum === null) {
-          const notaRaw = cell.notaObtida.trim().replace(',', '.');
-          if (notaRaw === '') continue;
-          const parsed = Number(notaRaw);
-          if (!Number.isFinite(parsed)) continue;
-          notaNum = parsed;
+          if (isAptoMarker) {
+            if (cell.resultadoApto !== 'APTO' && cell.resultadoApto !== 'INAPTO') continue;
+            resultadoAptoVal = cell.resultadoApto;
+            notaNum = cell.resultadoApto === 'APTO' ? 1 : 0;
+          } else {
+            const notaRaw = cell.notaObtida.trim().replace(',', '.');
+            if (notaRaw === '') continue;
+            const parsed = Number(notaRaw);
+            if (!Number.isFinite(parsed)) continue;
+            notaNum = parsed;
+          }
         }
 
         const tirosRaw = cell.tirosEfetuados.trim();
@@ -892,6 +949,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
           valorMarca,
           tempoSegundos,
           notaObtida: notaNum,
+          resultadoApto: resultadoAptoVal,
           ausente: false,
           ausenciaInformada: null,
           tirosEfetuados,
@@ -902,7 +960,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     }
 
     if (payload.length === 0) {
-      notify('error', 'Informe a nota ou marque ausência de ao menos um policial antes de salvar.');
+      notify('error', 'Informe a nota, aptidão (Apto/Inapto) ou marque ausência de ao menos um policial antes de salvar.');
       return;
     }
 
@@ -1622,10 +1680,20 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                           ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
                                           : saved.aprovado
                                           ? 'bg-emerald-500/15 text-emerald-300'
+                                          : saved.modoAvaliacaoRef === 'APTO_INAPTO' || isAptoInaptoMarker(m)
+                                          ? 'bg-rose-500/15 text-rose-300'
                                           : 'bg-amber-500/15 text-amber-300'
                                       }`}
                                     >
-                                      {saved.ausente ? 'Ausente' : saved.aprovado ? 'Aprovado' : 'Abaixo da Meta'}
+                                      {saved.ausente
+                                        ? 'Ausente'
+                                        : saved.modoAvaliacaoRef === 'APTO_INAPTO' || isAptoInaptoMarker(m)
+                                        ? saved.aprovado
+                                          ? 'Apto'
+                                          : 'Inapto'
+                                        : saved.aprovado
+                                        ? 'Aprovado'
+                                        : 'Abaixo da Meta'}
                                     </span>
                                   )}
                                 </div>
@@ -1640,10 +1708,12 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                 valorMarca: '',
                                 tempoInput: '',
                                 notaObtida: '',
+                                resultadoApto: '',
                                 tirosEfetuados: '',
                                 acertosTiros: '',
                                 observacoes: ''
                               };
+                              const isAptoMarker = isAptoInaptoMarker(m);
                               const valRaw = cell.valorMarca.trim().replace(',', '.');
                               const valorMarcaNum = valRaw !== '' && Number.isFinite(Number(valRaw)) ? Number(valRaw) : null;
                               const acertosRaw = (cell.acertosTiros || '').trim().replace(',', '.');
@@ -1670,12 +1740,25 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
 
                               const distResult = hasAutoDist
                                 ? calculateDistributedScore(m, valorMarcaNum, timeSec, acertosNum)
-                                : { hasInput: false, nota: null, matchedTier: null, belowMinimumTier: false, achievedRate: null };
+                                : {
+                                    hasInput: false,
+                                    nota: null,
+                                    resultadoApto: null,
+                                    matchedTier: null,
+                                    belowMinimumTier: false,
+                                    achievedRate: null
+                                  };
 
                               const manualNotaNum = Number(cell.notaObtida.replace(',', '.'));
                               const effectiveNota =
                                 hasAutoDist && distResult.hasInput && distResult.nota !== null
                                   ? distResult.nota
+                                  : isAptoMarker
+                                  ? cell.resultadoApto === 'APTO'
+                                    ? 1
+                                    : cell.resultadoApto === 'INAPTO'
+                                    ? 0
+                                    : null
                                   : cell.notaObtida.trim() !== '' && Number.isFinite(manualNotaNum)
                                   ? manualNotaNum
                                   : null;
@@ -1709,6 +1792,10 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                     );
                                     nextCell.notaObtida =
                                       nextDist.hasInput && nextDist.nota !== null ? String(nextDist.nota) : '';
+                                    if (isAptoMarker) {
+                                      nextCell.resultadoApto =
+                                        nextDist.hasInput && nextDist.resultadoApto ? nextDist.resultadoApto : '';
+                                    }
                                   }
                                   return {
                                     ...prev,
@@ -1740,8 +1827,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                                 : ''
                                             } • `
                                           : ''}
-                                        Nota: {formatNumberBr(m.notaMinima)} a {formatNumberBr(m.notaMaxima)} (aprovação ≥{' '}
-                                        {formatNumberBr(m.notaAprovacao)})
+                                        {isAptoMarker
+                                          ? 'Avaliação: Apto / Inapto (sem pontuação)'
+                                          : `Nota: ${formatNumberBr(m.notaMinima)} a ${formatNumberBr(m.notaMaxima)} (aprovação ≥ ${formatNumberBr(m.notaAprovacao)})`}
                                         {m.usaTempo && m.tempoAprovacaoSegundos != null
                                           ? ` • Tempo alvo ${tempoOp} ${formatSecondsCompact(m.tempoAprovacaoSegundos)}`
                                           : ''}
@@ -1761,10 +1849,18 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                         className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
                                           isAprovPreview
                                             ? 'bg-emerald-500/15 text-emerald-300'
+                                            : isAptoMarker
+                                            ? 'bg-rose-500/15 text-rose-300'
                                             : 'bg-amber-500/15 text-amber-300'
                                         }`}
                                       >
-                                        {isAprovPreview ? 'Aprovado' : 'Abaixo da Meta'}
+                                        {isAptoMarker
+                                          ? isAprovPreview
+                                            ? 'Apto'
+                                            : 'Inapto'
+                                          : isAprovPreview
+                                          ? 'Aprovado'
+                                          : 'Abaixo da Meta'}
                                       </span>
                                     ) : null}
                                   </div>
@@ -1772,7 +1868,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   {hasAutoDist && m.regrasDistribuicao && (
                                     <div className="text-[10px] text-sky-200/90 bg-sky-500/10 border border-sky-500/25 rounded-lg px-2.5 py-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                                       <span className="font-extrabold text-sky-300 uppercase">
-                                        Cálculo automático (
+                                        {isAptoMarker ? 'Critério automático' : 'Cálculo automático'} (
                                         {m.fatorDistribuicao === 'TEMPO'
                                           ? 'por Tempo'
                                           : m.fatorDistribuicao === 'MARCA_TEMPO'
@@ -1794,7 +1890,14 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                             : m.fatorDistribuicao === 'TIROS_TEMPO'
                                             ? `${formatNumberBr(r.valor)} tiro(s) em ${formatNumberBr(r.tempoSegundos ?? 1)}s (${formatNumberBr(computeTierRate(r) ?? 0)}/s)`
                                             : `${formatNumberBr(r.valor)} ${m.unidadeMedida || ''}`}{' '}
-                                          = <strong className="text-amber-300">{formatNumberBr(r.pontos)} pts</strong>
+                                          ={' '}
+                                          {isAptoMarker ? (
+                                            <strong className={isTierApto(r) ? 'text-emerald-300' : 'text-rose-300'}>
+                                              {isTierApto(r) ? 'Apto' : 'Inapto'}
+                                            </strong>
+                                          ) : (
+                                            <strong className="text-amber-300">{formatNumberBr(r.pontos)} pts</strong>
+                                          )}
                                           {rIdx < (m.regrasDistribuicao?.length || 0) - 1 ? ' •' : ''}
                                         </span>
                                       ))}
@@ -1903,49 +2006,149 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
 
                                     <div>
                                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                                        {hasAutoDist ? 'Nota Calculada (auto)' : `Pontuação / Nota ${isParticipantAbsent ? '' : '*'}`}
+                                        {isAptoMarker
+                                          ? hasAutoDist
+                                            ? 'Resultado (auto)'
+                                            : `Resultado ${isParticipantAbsent ? '' : '*'}`
+                                          : hasAutoDist
+                                          ? 'Nota Calculada (auto)'
+                                          : `Pontuação / Nota ${isParticipantAbsent ? '' : '*'}`}
                                       </label>
-                                      <input
-                                        type="text"
-                                        inputMode="decimal"
-                                        disabled={isParticipantAbsent}
-                                        readOnly={hasAutoDist}
-                                        value={
-                                          isParticipantAbsent
-                                            ? ''
-                                            : hasAutoDist
-                                            ? distResult.hasInput && distResult.nota !== null
-                                              ? String(distResult.nota)
-                                              : ''
-                                            : cell.notaObtida
-                                        }
-                                        onChange={e => {
-                                          if (!hasAutoDist) updateCell({ notaObtida: e.target.value });
-                                        }}
-                                        placeholder={
-                                          isParticipantAbsent
-                                            ? 'Ausente'
-                                            : hasAutoDist
-                                            ? isMixedDriver
+                                      {isAptoMarker ? (
+                                        hasAutoDist ? (
+                                          <div
+                                            className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-extrabold ${
+                                              isParticipantAbsent
+                                                ? 'bg-slate-900/50 border-slate-800 text-slate-500'
+                                                : distResult.hasInput
+                                                ? isAprovPreview
+                                                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                                                  : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                                                : 'bg-slate-900/90 border-slate-700 text-slate-400'
+                                            }`}
+                                          >
+                                            {isParticipantAbsent
+                                              ? 'Ausente'
+                                              : distResult.hasInput
+                                              ? isAprovPreview
+                                                ? 'APTO'
+                                                : 'INAPTO'
+                                              : isMixedDriver
                                               ? `Informe ${m.unidadeMedida || 'marca'} e/ou tempo`
                                               : isTempoDriver
                                               ? 'Informe o tempo'
-                                              : isAcertosDriver
-                                              ? 'Informe os acertos'
-                                              : isShotRateDriver
-                                              ? 'Informe acertos e tempo'
-                                              : `Informe ${m.unidadeMedida || 'o índice'}`
-                                            : `${formatNumberBr(m.notaMinima)} - ${formatNumberBr(m.notaMaxima)}`
-                                        }
-                                        className={`w-full border disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs font-bold focus:outline-none ${
-                                          hasAutoDist
-                                            ? 'bg-slate-900/90 border-emerald-500/40 text-emerald-300 cursor-not-allowed'
-                                            : 'bg-slate-950 border-slate-700 text-amber-300 focus:border-amber-500'
-                                        }`}
-                                      />
+                                              : `Informe ${m.unidadeMedida || 'o índice'}`}
+                                          </div>
+                                        ) : (
+                                          <div className="grid grid-cols-2 gap-1.5">
+                                            <button
+                                              type="button"
+                                              disabled={isParticipantAbsent}
+                                              onClick={() =>
+                                                updateCell({
+                                                  resultadoApto: cell.resultadoApto === 'APTO' ? '' : 'APTO',
+                                                  notaObtida: cell.resultadoApto === 'APTO' ? '' : '1'
+                                                })
+                                              }
+                                              className={`py-1.5 rounded-lg text-xs font-extrabold border transition disabled:opacity-40 ${
+                                                !isParticipantAbsent && cell.resultadoApto === 'APTO'
+                                                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow'
+                                                  : 'bg-slate-950 border-slate-700 text-slate-300 hover:border-emerald-500/50'
+                                              }`}
+                                            >
+                                              Apto
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={isParticipantAbsent}
+                                              onClick={() =>
+                                                updateCell({
+                                                  resultadoApto: cell.resultadoApto === 'INAPTO' ? '' : 'INAPTO',
+                                                  notaObtida: cell.resultadoApto === 'INAPTO' ? '' : '0'
+                                                })
+                                              }
+                                              className={`py-1.5 rounded-lg text-xs font-extrabold border transition disabled:opacity-40 ${
+                                                !isParticipantAbsent && cell.resultadoApto === 'INAPTO'
+                                                  ? 'bg-rose-500 text-white border-rose-400 shadow'
+                                                  : 'bg-slate-950 border-slate-700 text-slate-300 hover:border-rose-500/50'
+                                              }`}
+                                            >
+                                              Inapto
+                                            </button>
+                                          </div>
+                                        )
+                                      ) : (
+                                        <input
+                                          type="text"
+                                          inputMode="decimal"
+                                          disabled={isParticipantAbsent}
+                                          readOnly={hasAutoDist}
+                                          value={
+                                            isParticipantAbsent
+                                              ? ''
+                                              : hasAutoDist
+                                              ? distResult.hasInput && distResult.nota !== null
+                                                ? String(distResult.nota)
+                                                : ''
+                                              : cell.notaObtida
+                                          }
+                                          onChange={e => {
+                                            if (!hasAutoDist) updateCell({ notaObtida: e.target.value });
+                                          }}
+                                          placeholder={
+                                            isParticipantAbsent
+                                              ? 'Ausente'
+                                              : hasAutoDist
+                                              ? isMixedDriver
+                                                ? `Informe ${m.unidadeMedida || 'marca'} e/ou tempo`
+                                                : isTempoDriver
+                                                ? 'Informe o tempo'
+                                                : isAcertosDriver
+                                                ? 'Informe os acertos'
+                                                : isShotRateDriver
+                                                ? 'Informe acertos e tempo'
+                                                : `Informe ${m.unidadeMedida || 'o índice'}`
+                                              : `${formatNumberBr(m.notaMinima)} - ${formatNumberBr(m.notaMaxima)}`
+                                          }
+                                          className={`w-full border disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs font-bold focus:outline-none ${
+                                            hasAutoDist
+                                              ? 'bg-slate-900/90 border-emerald-500/40 text-emerald-300 cursor-not-allowed'
+                                              : 'bg-slate-950 border-slate-700 text-amber-300 focus:border-amber-500'
+                                          }`}
+                                        />
+                                      )}
                                       {hasAutoDist && !isParticipantAbsent && distResult.hasInput && (
-                                        <div className="text-[10px] text-emerald-300/90 mt-0.5">
-                                          {m.fatorDistribuicao === 'MARCA_TEMPO'
+                                        <div
+                                          className={`text-[10px] mt-0.5 ${
+                                            isAptoMarker
+                                              ? isAprovPreview
+                                                ? 'text-emerald-300/90'
+                                                : 'text-rose-300/90'
+                                              : 'text-emerald-300/90'
+                                          }`}
+                                        >
+                                          {isAptoMarker
+                                            ? m.fatorDistribuicao === 'MARCA_TEMPO'
+                                              ? `${[
+                                                  timeSec !== null
+                                                    ? distResult.matchedTempoTier
+                                                      ? `Tempo ${tempoOp} ${formatSecondsCompact(distResult.matchedTempoTier.valor)} (${isTierApto(distResult.matchedTempoTier) ? 'Apto' : 'Inapto'})`
+                                                      : 'Tempo fora da faixa (Inapto)'
+                                                    : null,
+                                                  valorMarcaNum !== null
+                                                    ? distResult.matchedMarcaTier
+                                                      ? `${formatNumberBr(distResult.matchedMarcaTier.valor)} ${m.unidadeMedida || ''} (${isTierApto(distResult.matchedMarcaTier) ? 'Apto' : 'Inapto'})`
+                                                      : `${m.tipoMarca || 'Marca'} abaixo da faixa (Inapto)`
+                                                    : null
+                                                ]
+                                                  .filter(Boolean)
+                                                  .join(' + ')} → ${isAprovPreview ? 'APTO' : 'INAPTO'}`
+                                              : distResult.matchedTier
+                                              ? m.fatorDistribuicao === 'TEMPO'
+                                                ? `Faixa ${tempoOp} ${formatSecondsCompact(distResult.matchedTier.valor)} → ${isAprovPreview ? 'APTO' : 'INAPTO'}`
+                                                : `Faixa ≥ ${formatNumberBr(distResult.matchedTier.valor)} ${m.unidadeMedida || ''} → ${isAprovPreview ? 'APTO' : 'INAPTO'}`
+                                              : 'Fora das faixas de aprovação → INAPTO'
+                                            : m.fatorDistribuicao === 'MARCA_TEMPO'
                                             ? distResult.matchedTempoTier || distResult.matchedMarcaTier
                                               ? `${[
                                                   distResult.matchedTempoTier
@@ -2094,9 +2297,14 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                         <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-bold text-amber-300">
                           {m.dificuldade}
                         </span>
+                        {isAptoInaptoMarker(m) && (
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/35 text-[10px] font-bold text-emerald-300">
+                            Apto / Inapto (sem pontuação)
+                          </span>
+                        )}
                         {m.usaDistribuicaoNota && m.regrasDistribuicao && m.regrasDistribuicao.length > 0 && (
                           <span className="px-2 py-0.5 rounded bg-sky-500/15 border border-sky-500/30 text-[10px] font-bold text-sky-300">
-                            Pontuação Distribuída ({m.regrasDistribuicao.length} faixas)
+                            {isAptoInaptoMarker(m) ? 'Critério Distribuído' : 'Pontuação Distribuída'} ({m.regrasDistribuicao.length} faixas)
                           </span>
                         )}
                       </div>
@@ -2145,16 +2353,31 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] bg-slate-900/70 border border-slate-800/80 rounded-lg p-2.5">
-                    <div>
-                      <span className="text-slate-500 block">Pontuação (Min / Máx)</span>
-                      <strong className="text-slate-200">
-                        {formatNumberBr(m.notaMinima)} — {formatNumberBr(m.notaMaxima)}
-                      </strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block">Aprovação</span>
-                      <strong className="text-emerald-400">≥ {formatNumberBr(m.notaAprovacao)} pts</strong>
-                    </div>
+                    {isAptoInaptoMarker(m) ? (
+                      <>
+                        <div>
+                          <span className="text-slate-500 block">Modo de Avaliação</span>
+                          <strong className="text-emerald-300">Sem pontuação numérica</strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">Resultado</span>
+                          <strong className="text-emerald-400">Apto / Inapto</strong>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <span className="text-slate-500 block">Pontuação (Min / Máx)</span>
+                          <strong className="text-slate-200">
+                            {formatNumberBr(m.notaMinima)} — {formatNumberBr(m.notaMaxima)}
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">Aprovação</span>
+                          <strong className="text-emerald-400">≥ {formatNumberBr(m.notaAprovacao)} pts</strong>
+                        </div>
+                      </>
+                    )}
                     <div>
                       <span className="text-slate-500 block">Controle de Tempo</span>
                       <strong className="text-slate-200">
@@ -2168,7 +2391,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                     {m.usaDistribuicaoNota && m.regrasDistribuicao && m.regrasDistribuicao.length > 0 && (
                       <div className="col-span-2 sm:col-span-3 pt-1.5 border-t border-slate-800">
                         <span className="text-sky-300 font-bold block mb-1">
-                          Distribuição de Pontos (
+                          {isAptoInaptoMarker(m) ? 'Distribuição Apto / Inapto (' : 'Distribuição de Pontos ('}
                           {m.fatorDistribuicao === 'TEMPO'
                             ? 'por Tempo'
                             : m.fatorDistribuicao === 'MARCA_TEMPO'
@@ -2212,7 +2435,14 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   : m.fatorDistribuicao === 'TIROS_TEMPO'
                                   ? `${formatNumberBr(r.valor)} tiro(s) em ${formatNumberBr(r.tempoSegundos ?? 1)}s (${formatNumberBr(computeTierRate(r) ?? 0)}/s)`
                                   : `${formatNumberBr(r.valor)} ${m.unidadeMedida || ''}`}{' '}
-                                = <strong className="text-amber-300">{formatNumberBr(r.pontos)} pts</strong>
+                                ={' '}
+                                {isAptoInaptoMarker(m) ? (
+                                  <strong className={isTierApto(r) ? 'text-emerald-300' : 'text-rose-300'}>
+                                    {isTierApto(r) ? 'Apto' : 'Inapto'}
+                                  </strong>
+                                ) : (
+                                  <strong className="text-amber-300">{formatNumberBr(r.pontos)} pts</strong>
+                                )}
                               </span>
                             );
                           })}
@@ -2374,47 +2604,94 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                   </select>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 sm:col-span-2">
-                  <div>
-                    <label className="block font-bold text-slate-300 mb-1">
-                      {mCategoria === 'FISICO' ? 'Nota Mínima *' : 'Pontuação Mínima *'}
-                    </label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      required
-                      value={mNotaMin}
-                      onChange={e => setMNotaMin(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-amber-500"
-                    />
+                {mCategoria === 'FISICO' && (
+                  <div className="sm:col-span-2 bg-slate-950/70 border border-slate-800 rounded-xl p-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="font-bold text-slate-200 block">Tipo de Avaliação do Índice *</span>
+                        <span className="text-[11px] text-slate-400">
+                          Escolha se o índice terá nota numérica ou avaliação qualitativa Apto / Inapto (sem pontuação).
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setMModoAvaliacao('PONTUACAO')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition border ${
+                            mModoAvaliacao === 'PONTUACAO'
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                              : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-600'
+                          }`}
+                        >
+                          Com Pontuação (Nota)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMModoAvaliacao('APTO_INAPTO')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition border ${
+                            mModoAvaliacao === 'APTO_INAPTO'
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow'
+                              : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-600'
+                          }`}
+                        >
+                          Apto / Inapto (Sem Pontuação)
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block font-bold text-slate-300 mb-1">
-                      {mCategoria === 'FISICO' ? 'Nota Máxima *' : 'Pontuação Máxima *'}
-                    </label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      required
-                      value={mNotaMax}
-                      onChange={e => setMNotaMax(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-amber-500"
-                    />
+                )}
+
+                {mCategoria === 'FISICO' && mModoAvaliacao === 'APTO_INAPTO' ? (
+                  <div className="sm:col-span-2 bg-emerald-950/25 border border-emerald-500/35 rounded-xl p-3 text-[11px] text-emerald-200/90">
+                    <strong className="text-emerald-300 block mb-0.5">
+                      Modo Apto / Inapto ativo (sem pontuação numérica)
+                    </strong>
+                    O resultado do policial será registrado diretamente como <strong>Apto</strong> ou <strong>Inapto</strong>.
+                    Você também pode desmarcar o controle de tempo abaixo (atividade sem tempo) e/ou configurar faixas de distribuição simples ou mistas (ex.: <em>50 metros = Apto</em>, <em>05:00 = Apto</em>, <em>30 metros = Inapto</em>).
                   </div>
-                  <div>
-                    <label className="block font-bold text-emerald-300 mb-1">
-                      {mCategoria === 'FISICO' ? 'Nota de Aprovação *' : 'Pontuação Aprovação *'}
-                    </label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      required
-                      value={mNotaAprov}
-                      onChange={e => setMNotaAprov(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-amber-500"
-                    />
+                ) : (
+                  <div className="grid grid-cols-3 gap-2 sm:col-span-2">
+                    <div>
+                      <label className="block font-bold text-slate-300 mb-1">
+                        {mCategoria === 'FISICO' ? 'Nota Mínima *' : 'Pontuação Mínima *'}
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        value={mNotaMin}
+                        onChange={e => setMNotaMin(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-300 mb-1">
+                        {mCategoria === 'FISICO' ? 'Nota Máxima *' : 'Pontuação Máxima *'}
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        value={mNotaMax}
+                        onChange={e => setMNotaMax(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-emerald-300 mb-1">
+                        {mCategoria === 'FISICO' ? 'Nota de Aprovação *' : 'Pontuação Aprovação *'}
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        value={mNotaAprov}
+                        onChange={e => setMNotaAprov(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
               {/* Controle de Tempo (opcional para marcadores Físicos e Táticos) */}
@@ -2625,7 +2902,8 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                 tipo: mFatorDistribuicao === 'TEMPO' ? 'TEMPO' : 'MARCA',
                                 valor: '',
                                 tempoSegundos: '1',
-                                pontos: ''
+                                pontos: '',
+                                resultado: 'APTO'
                               }
                             ]);
                           }
@@ -2635,10 +2913,14 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                     />
                     <div>
                       <div className="font-bold text-sky-300">
-                        Distribuir pontuação por faixas / divisões (cálculo automático da nota)
+                        {mCategoria === 'FISICO' && mModoAvaliacao === 'APTO_INAPTO'
+                          ? 'Distribuir critério de Apto / Inapto por faixas / divisões (cálculo automático)'
+                          : 'Distribuir pontuação por faixas / divisões (cálculo automático da nota)'}
                       </div>
                       <div className="text-[11px] text-slate-400">
-                        {mCategoria === 'FISICO'
+                        {mCategoria === 'FISICO' && mModoAvaliacao === 'APTO_INAPTO'
+                          ? `Defina faixas de ${mTipoMarca.toLowerCase()} e/ou tempo que resultam em Apto ou Inapto (ex.: 50 metros = Apto, 05:00 = Apto, 30 metros = Inapto).`
+                          : mCategoria === 'FISICO'
                           ? `Defina quantos pontos vale cada fração de ${mTipoMarca.toLowerCase()} ou tempo. Ao lançar o índice atingido, o sistema calcula a nota automaticamente.`
                           : 'Defina faixas de acertos ou distribuição cruzada (tiros/acertos por segundo) para cálculo automático da pontuação.'}
                       </div>
@@ -2650,7 +2932,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                         <div className="sm:col-span-2">
                           <label className="block font-bold text-slate-300 mb-1">
-                            Fator de Distribuição dos Pontos *
+                            {mCategoria === 'FISICO' && mModoAvaliacao === 'APTO_INAPTO'
+                              ? 'Fator de Distribuição (Apto / Inapto) *'
+                              : 'Fator de Distribuição dos Pontos *'}
                           </label>
                           <select
                             value={mFatorDistribuicao}
@@ -2665,7 +2949,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                 setMRegrasDistribuicao(prev =>
                                   prev.length > 0
                                     ? prev
-                                    : [{ tipo: 'MARCA', valor: '', tempoSegundos: '1', pontos: '' }]
+                                    : [{ tipo: 'MARCA', valor: '', tempoSegundos: '1', pontos: '', resultado: 'APTO' }]
                                 );
                               } else {
                                 const targetRowTipo: 'MARCA' | 'TEMPO' = nextFator === 'TEMPO' ? 'TEMPO' : 'MARCA';
@@ -2674,7 +2958,8 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                     tipo: targetRowTipo,
                                     valor: r.tipo === targetRowTipo ? r.valor : '',
                                     tempoSegundos: '1',
-                                    pontos: r.pontos
+                                    pontos: r.pontos,
+                                    resultado: r.resultado || 'APTO'
                                   }))
                                 );
                               }
@@ -2730,14 +3015,24 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                             <span className="font-bold text-slate-300">
                               Tabela de Divisões (
                               {mFatorDistribuicao === 'TEMPO'
-                                ? 'Tempo → Pontos'
+                                ? mCategoria === 'FISICO' && mModoAvaliacao === 'APTO_INAPTO'
+                                  ? 'Tempo → Apto / Inapto'
+                                  : 'Tempo → Pontos'
                                 : mFatorDistribuicao === 'MARCA_TEMPO'
-                                ? `Tempo e ${mUnidadeMedida.trim() || mTipoMarca} → Pontos`
+                                ? `Tempo e ${mUnidadeMedida.trim() || mTipoMarca} → ${
+                                    mCategoria === 'FISICO' && mModoAvaliacao === 'APTO_INAPTO'
+                                      ? 'Apto / Inapto'
+                                      : 'Pontos'
+                                  }`
                                 : mFatorDistribuicao === 'ACERTOS'
                                 ? 'Acertos → Pontos'
                                 : mFatorDistribuicao === 'TIROS_TEMPO'
                                 ? 'Tiros/Acertos em Tempo (s) → Pontos'
-                                : `${mUnidadeMedida.trim() || mTipoMarca} → Pontos`}
+                                : `${mUnidadeMedida.trim() || mTipoMarca} → ${
+                                    mCategoria === 'FISICO' && mModoAvaliacao === 'APTO_INAPTO'
+                                      ? 'Apto / Inapto'
+                                      : 'Pontos'
+                                  }`}
                               )
                             </span>
                             {mCategoria === 'FISICO' && (() => {
@@ -2761,7 +3056,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   if (mRegrasDistribuicao.length >= 30) return;
                                   const next = [
                                     ...mRegrasDistribuicao,
-                                    { tipo: 'MARCA' as const, valor: '', tempoSegundos: '1', pontos: '' }
+                                    {
+                                      tipo: 'MARCA' as const,
+                                      valor: '',
+                                      tempoSegundos: '1',
+                                      pontos: '',
+                                      resultado: 'APTO' as const
+                                    }
                                   ];
                                   setMRegrasDistribuicao(next);
                                   if (next.some(r => r.tipo === 'TEMPO') && next.some(r => r.tipo === 'MARCA')) {
@@ -2780,7 +3081,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   if (!mUsaTempo) setMUsaTempo(true);
                                   const next = [
                                     ...mRegrasDistribuicao,
-                                    { tipo: 'TEMPO' as const, valor: '', tempoSegundos: '1', pontos: '' }
+                                    {
+                                      tipo: 'TEMPO' as const,
+                                      valor: '',
+                                      tempoSegundos: '1',
+                                      pontos: '',
+                                      resultado: 'APTO' as const
+                                    }
                                   ];
                                   setMRegrasDistribuicao(next);
                                   if (next.some(r => r.tipo === 'TEMPO') && next.some(r => r.tipo === 'MARCA')) {
@@ -2807,7 +3114,8 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                           tipo: mFatorDistribuicao === 'TEMPO' ? 'TEMPO' : 'MARCA',
                                           valor: '',
                                           tempoSegundos: '1',
-                                          pontos: ''
+                                          pontos: '',
+                                          resultado: 'APTO'
                                         }
                                       ]
                                     : prev
@@ -2981,23 +3289,49 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                 )}
 
                                 <span className="col-span-1 text-[10px] font-bold text-slate-400 text-center">
-                                  vale
+                                  {mCategoria === 'FISICO' && mModoAvaliacao === 'APTO_INAPTO' ? 'gera' : 'vale'}
                                 </span>
                                 <div className={`${mCategoria === 'FISICO' || mFatorDistribuicao === 'TIROS_TEMPO' ? 'col-span-3' : 'col-span-4'} flex items-center gap-1.5`}>
-                                  <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    value={tier.pontos}
-                                    onChange={e => {
-                                      const nextPts = e.target.value;
-                                      setMRegrasDistribuicao(prev =>
-                                        prev.map((item, i) => (i === idx ? { ...item, pontos: nextPts } : item))
-                                      );
-                                    }}
-                                    placeholder="Ex: 2"
-                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-amber-300 font-bold focus:outline-none focus:border-amber-500"
-                                  />
-                                  <span className="text-[10px] text-slate-400 shrink-0">pts</span>
+                                  {mCategoria === 'FISICO' && mModoAvaliacao === 'APTO_INAPTO' ? (
+                                    <select
+                                      value={tier.resultado || 'APTO'}
+                                      onChange={e => {
+                                        const nextRes = e.target.value as ResultadoAptoInapto;
+                                        setMRegrasDistribuicao(prev =>
+                                          prev.map((item, i) =>
+                                            i === idx
+                                              ? { ...item, resultado: nextRes, pontos: nextRes === 'APTO' ? '1' : '0' }
+                                              : item
+                                          )
+                                        );
+                                      }}
+                                      className={`w-full bg-slate-950 border rounded-lg px-2 py-1.5 font-extrabold focus:outline-none ${
+                                        (tier.resultado || 'APTO') === 'APTO'
+                                          ? 'border-emerald-500/50 text-emerald-300'
+                                          : 'border-rose-500/50 text-rose-300'
+                                      }`}
+                                    >
+                                      <option value="APTO">Apto</option>
+                                      <option value="INAPTO">Inapto</option>
+                                    </select>
+                                  ) : (
+                                    <>
+                                      <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={tier.pontos}
+                                        onChange={e => {
+                                          const nextPts = e.target.value;
+                                          setMRegrasDistribuicao(prev =>
+                                            prev.map((item, i) => (i === idx ? { ...item, pontos: nextPts } : item))
+                                          );
+                                        }}
+                                        placeholder="Ex: 2"
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-amber-300 font-bold focus:outline-none focus:border-amber-500"
+                                      />
+                                      <span className="text-[10px] text-slate-400 shrink-0">pts</span>
+                                    </>
+                                  )}
                                 </div>
                                 <div className="col-span-1 flex justify-end">
                                   <button
@@ -3018,7 +3352,15 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                         </div>
 
                         <p className="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-800 rounded-lg px-2.5 py-2">
-                          {mFatorDistribuicao === 'MARCA_TEMPO'
+                          {mCategoria === 'FISICO' && mModoAvaliacao === 'APTO_INAPTO'
+                            ? mFatorDistribuicao === 'MARCA_TEMPO'
+                              ? `Regra mista Apto/Inapto (Tempo + ${mTipoMarca}): combine faixas de Tempo e de ${mTipoMarca} (ex.: 50 ${mUnidadeMedida.trim() || 'un.'} = Apto, 05:00 = Apto, 30 ${mUnidadeMedida.trim() || 'un.'} = Inapto). Se ambos Tempo e ${mTipoMarca} forem informados no lançamento, ambos precisam resultar em Apto.`
+                              : mFatorDistribuicao === 'TEMPO'
+                              ? mTempoAprovModo === 'MENOR_IGUAL'
+                                ? 'Regra Apto/Inapto (tempo invertido): tempos iguais ou abaixo da faixa Apto resultam em Apto (ex.: 05:00 = Apto; 05:01 = Inapto).'
+                                : 'Regra Apto/Inapto (tempo normal): tempos iguais ou acima da faixa Apto resultam em Apto (ex.: 05:00 = Apto; 04:59 = Inapto).'
+                              : `Regra Apto/Inapto por ${mTipoMarca}: o sistema aplica o último degrau atingido (ex.: 30 ${mUnidadeMedida.trim() || 'un.'} = Inapto e 50 ${mUnidadeMedida.trim() || 'un.'} = Apto → 45 vale Inapto e 50 ou mais vale Apto). Clique em "+ Tempo" para combinar com tempo.`
+                            : mFatorDistribuicao === 'MARCA_TEMPO'
                             ? `Regra mista (Tempo + ${mTipoMarca}): você pode combinar divisões de Tempo e de ${mTipoMarca} no mesmo índice (ex.: 3 faixas de Tempo e 2 de ${mTipoMarca}). Se ambos forem lançados e a soma das maiores faixas couber na nota máxima, os pontos são somados; caso contrário, aplica-se a maior faixa atingida.`
                             : mFatorDistribuicao === 'TEMPO'
                             ? mTempoAprovModo === 'MENOR_IGUAL'

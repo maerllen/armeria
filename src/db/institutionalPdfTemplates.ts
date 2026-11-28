@@ -4310,6 +4310,7 @@ export interface SystemDesempenhoResultadoPdf {
   notaMinRef: number;
   notaMaxRef: number;
   notaAprovacaoRef: number;
+  modoAvaliacaoRef?: 'PONTUACAO' | 'APTO_INAPTO' | null;
   tempoAprovacaoRef?: number | null;
   aprovado: boolean;
   ausente: boolean;
@@ -4347,6 +4348,7 @@ export interface SystemDesempenhoMarcadorPdf {
   notaMin: number;
   notaMax: number;
   notaAprovacao: number;
+  modoAvaliacao?: 'PONTUACAO' | 'APTO_INAPTO' | null;
   dificuldade?: string | null;
   teveTiro: boolean;
   tipoArma?: string | null;
@@ -4562,9 +4564,14 @@ function formatResultadoResumoPdf(r: SystemDesempenhoResultadoPdf): string {
     parts.push(`(${fmtNumBrPdf(r.taxaAcertoPorSegundo)}/s)`);
   }
   const left = parts.join(' ');
-  const pts = `${fmtNumBrPdf(r.notaObtida)} pts`;
+  const isAptoInapto = r.modoAvaliacaoRef === 'APTO_INAPTO';
+  const scoreOrStatus = isAptoInapto
+    ? r.aprovado
+      ? 'Apto'
+      : 'Inapto'
+    : `${fmtNumBrPdf(r.notaObtida)} pts`;
   const shotPart = r.teveTiro && r.tipoArma ? ` - ${r.tirosEfetuados ?? 0} tiros (${r.tipoArma})` : '';
-  return left ? `${left} - ${pts}${shotPart}` : `${pts}${shotPart}`;
+  return left ? `${left} - ${scoreOrStatus}${shotPart}` : `${scoreOrStatus}${shotPart}`;
 }
 
 interface ComputedMarkerSummaryPdf {
@@ -5440,8 +5447,22 @@ async function renderSingleUserPerformancePage(opts: {
       });
 
       const ty = y - 10;
-      const stColor = r.ausente ? PCMG_COLORS.redText : r.aprovado ? PCMG_COLORS.emerald700 : PCMG_COLORS.amber600;
-      const stTxt = r.ausente ? 'Ausente' : r.aprovado ? 'Aprovado' : 'Abaixo Meta';
+      const stColor = r.ausente
+        ? PCMG_COLORS.redText
+        : r.aprovado
+        ? PCMG_COLORS.emerald700
+        : r.modoAvaliacaoRef === 'APTO_INAPTO'
+        ? PCMG_COLORS.redText
+        : PCMG_COLORS.amber600;
+      const stTxt = r.ausente
+        ? 'Ausente'
+        : r.modoAvaliacaoRef === 'APTO_INAPTO'
+        ? r.aprovado
+          ? 'Apto'
+          : 'Inapto'
+        : r.aprovado
+        ? 'Aprovado'
+        : 'Abaixo Meta';
 
       page.drawText(fmtIsoDateBrPdf(r.dataAvaliacao), { x: marginX + 4, y: ty, size: 6.4, font: fontRegular, color: PCMG_COLORS.slate700 });
       page.drawText(fitTextToWidth(r.marcadorNome, fontBold, 6.4, hCol2 - 6), { x: marginX + hCol1 + 4, y: ty, size: 6.4, font: fontBold, color: PCMG_COLORS.ink });
@@ -5671,7 +5692,11 @@ export async function generateSystemFichaDesempenhoUnidadePdf(
             }`
           : 'Sem disparo';
       const tempoCmp = m.tempoAprovacaoModo === 'MAIOR_IGUAL' ? '>=' : '<=';
-      const metaCol = `>= ${fmtNumBrPdf(m.notaAprovacao)}/${fmtNumBrPdf(m.notaMax)} pts${
+      const baseMeta =
+        m.modoAvaliacao === 'APTO_INAPTO'
+          ? 'Apto / Inapto'
+          : `>= ${fmtNumBrPdf(m.notaAprovacao)}/${fmtNumBrPdf(m.notaMax)} pts`;
+      const metaCol = `${baseMeta}${
         m.usaTempo && m.tempoAprovacaoSeg != null ? ` | ${tempoCmp} ${fmtSecondsCompactPdf(m.tempoAprovacaoSeg)}` : ''
       }`;
       const ty = y - 12;

@@ -106,10 +106,15 @@ export function formatResultadoResumo(r: DesempenhoResultado): string {
     parts.push(`(${formatNumberBr(r.taxaAcertoPorSegundo)}/s)`);
   }
   const left = parts.join(' ');
-  const pts = `${formatNumberBr(r.notaObtida)} pts`;
+  const isAptoInapto = r.modoAvaliacaoRef === 'APTO_INAPTO';
+  const scoreOrStatus = isAptoInapto
+    ? r.aprovado
+      ? 'Apto'
+      : 'Inapto'
+    : `${formatNumberBr(r.notaObtida)} pts`;
   const shotPart = r.teveTiro && r.tipoArma ? ` • ${r.tirosEfetuados ?? 0} tiros (${r.tipoArma})` : '';
-  if (left) return `${left} — ${pts}${shotPart}`;
-  return `${pts}${shotPart}`;
+  if (left) return `${left} — ${scoreOrStatus}${shotPart}`;
+  return `${scoreOrStatus}${shotPart}`;
 }
 
 function calcPercent(nota: number, maxRef: number): number {
@@ -379,8 +384,18 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
             <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-weight:600;">${escapeHtmlText(r.marcadorNome)}</td>
             <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${escapeHtmlText(r.atividadeNome || r.grupoNome || '—')}</td>
             <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${escapeHtmlText(formatResultadoResumo(r))}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:${r.ausente ? '#e11d48' : r.aprovado ? '#059669' : '#d97706'};">
-              ${r.ausente ? 'Ausente' : r.aprovado ? 'Aprovado' : 'Abaixo da Meta'}
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:${r.ausente ? '#e11d48' : r.aprovado ? '#059669' : r.modoAvaliacaoRef === 'APTO_INAPTO' ? '#e11d48' : '#d97706'};">
+              ${
+                r.ausente
+                  ? 'Ausente'
+                  : r.modoAvaliacaoRef === 'APTO_INAPTO'
+                  ? r.aprovado
+                    ? 'Apto'
+                    : 'Inapto'
+                  : r.aprovado
+                  ? 'Aprovado'
+                  : 'Abaixo da Meta'
+              }
             </td>
           </tr>
         `
@@ -1103,12 +1118,18 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
                         ) : r.aprovado ? (
                           <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[10px] font-extrabold">
                             <CheckCircle2 className="w-3 h-3" />
-                            <span>Aprovado</span>
+                            <span>{r.modoAvaliacaoRef === 'APTO_INAPTO' ? 'Apto' : 'Aprovado'}</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[10px] font-extrabold">
+                          <span
+                            className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                              r.modoAvaliacaoRef === 'APTO_INAPTO'
+                                ? 'bg-rose-500/15 text-rose-300'
+                                : 'bg-amber-500/15 text-amber-300'
+                            }`}
+                          >
                             <AlertTriangle className="w-3 h-3" />
-                            <span>Abaixo da Meta</span>
+                            <span>{r.modoAvaliacaoRef === 'APTO_INAPTO' ? 'Inapto' : 'Abaixo da Meta'}</span>
                           </span>
                         )}
                       </td>

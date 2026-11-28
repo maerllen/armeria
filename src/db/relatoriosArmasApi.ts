@@ -5218,6 +5218,7 @@ async function queryDesempenhoResultadosYear(
            r.NOTA_MIN_REF as notaMinRef,
            r.NOTA_MAX_REF as notaMaxRef,
            r.NOTA_APROVACAO_REF as notaAprovacaoRef,
+           r.MODO_AVALIACAO_REF as modoAvaliacaoRef,
            r.TEMPO_APROVACAO_REF as tempoAprovacaoRef,
            r.APROVADO as aprovado,
            r.AUSENTE as ausente,
@@ -5301,6 +5302,7 @@ async function queryDesempenhoResultadosYear(
       notaMinRef: Number(r.notaMinRef || 0),
       notaMaxRef: Number(r.notaMaxRef || 10),
       notaAprovacaoRef: Number(r.notaAprovacaoRef || 6),
+      modoAvaliacaoRef: String(r.modoAvaliacaoRef || '').toUpperCase() === 'APTO_INAPTO' ? 'APTO_INAPTO' : 'PONTUACAO',
       tempoAprovacaoRef:
         r.tempoAprovacaoRef !== null && r.tempoAprovacaoRef !== undefined ? Number(r.tempoAprovacaoRef) : null,
       aprovado: Boolean(r.aprovado),
@@ -5431,6 +5433,7 @@ async function queryDesempenhoUnidadeResumoYear(
                 USA_TEMPO as usaTempo, TEMPO_APROVACAO_SEG as tempoAprovacaoSeg,
                 TEMPO_APROVACAO_MODO as tempoAprovacaoModo,
                 NOTA_MIN as notaMin, NOTA_MAX as notaMax, NOTA_APROVACAO as notaAprovacao,
+                MODO_AVALIACAO as modoAvaliacao,
                 DIFICULDADE as dificuldade, TEVE_TIRO as teveTiro, TIPO_ARMA as tipoArma,
                 QUANTIDADE_TIROS as quantidadeTiros, QUANTIDADE_TIROS_PONTUADOS as quantidadeTirosPontuados,
                 DESCRICAO as descricao
@@ -5470,6 +5473,7 @@ async function queryDesempenhoUnidadeResumoYear(
       notaMin: Number(m.notaMin || 0),
       notaMax: Number(m.notaMax || 10),
       notaAprovacao: Number(m.notaAprovacao || 6),
+      modoAvaliacao: String(m.modoAvaliacao || '').toUpperCase() === 'APTO_INAPTO' ? 'APTO_INAPTO' : 'PONTUACAO',
       dificuldade: m.dificuldade || null,
       teveTiro: Boolean(m.teveTiro),
       tipoArma: m.tipoArma || null,
