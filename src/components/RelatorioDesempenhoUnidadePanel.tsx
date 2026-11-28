@@ -2080,7 +2080,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
             </div>
 
             {/* Painel de Lançamento / Visualização do Grupo Selecionado */}
-            <div className="xl:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            <div className="xl:col-span-8 min-w-0 bg-slate-900 border border-slate-800 rounded-2xl p-5">
               {!activeGroup ? (
                 <div className="py-16 text-center space-y-2">
                   <ClipboardList className="w-10 h-10 text-slate-600 mx-auto" />
@@ -2094,30 +2094,34 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
               ) : (
                 <div className="space-y-4">
                   {/* Cabeçalho do Grupo */}
-                  <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3 pb-4 border-b border-slate-800">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
+                  <div className="pb-4 border-b border-slate-800 space-y-3.5">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
                         <span
-                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                          className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide border ${
                             activeGroup.status === 'ENCERRADO'
-                              ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                              : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                              ? 'bg-emerald-500/12 text-emerald-300 border-emerald-500/30'
+                              : 'bg-amber-500/12 text-amber-300 border-amber-500/30'
                           }`}
                         >
                           {activeGroup.status === 'ENCERRADO' ? 'Encerrado / Arquivado' : 'Em Aberto'}
                         </span>
-                        <span className="text-xs text-slate-400">
-                          {activeGroup.modoLancamento} • Previsto: {formatDateBr(activeGroup.dataPrevista)}{' '}
+                        <span className="text-slate-400 font-medium tabular-nums">
+                          {activeGroup.modoLancamento} · Previsto: {formatDateBr(activeGroup.dataPrevista)}{' '}
                           {activeGroup.horaPrevista}
                         </span>
                       </div>
-                      <h3 className="text-base font-extrabold text-white mt-1">{activeGroup.nomeGrupo}</h3>
+                      <h3 className="text-lg font-extrabold text-white tracking-tight leading-snug mt-1.5 break-words">
+                        {activeGroup.nomeGrupo}
+                      </h3>
                       {activeGroup.atividadeDescricao && (
-                        <p className="text-xs text-slate-400 mt-1">{activeGroup.atividadeDescricao}</p>
+                        <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                          {activeGroup.atividadeDescricao}
+                        </p>
                       )}
                       {activeGroup.status === 'ENCERRADO' && activeGroup.encerradoPorNome && (
-                        <p className="text-[11px] text-emerald-300 mt-1 flex items-center space-x-1">
-                          <Lock className="w-3.5 h-3.5" />
+                        <p className="text-[11px] text-emerald-300 mt-1.5 flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5 shrink-0" />
                           <span>
                             Arquivado por {activeGroup.encerradoPorNome}{' '}
                             {activeGroup.encerradoEm
@@ -2128,109 +2132,118 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       )}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 shrink-0">
-                      {activeGroup.status === 'ABERTO' && (
-                        <>
-                          <input
-                            ref={pdfImportInputRef}
-                            type="file"
-                            accept="application/pdf,.pdf"
-                            onChange={handleImportGroupPdf}
-                            className="hidden"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => pdfImportInputRef.current?.click()}
-                            disabled={importingPdf}
-                            className="px-3.5 py-2 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 disabled:opacity-50 border border-indigo-500/40 text-indigo-300 text-xs font-extrabold flex items-center space-x-1.5 transition"
-                            title="Importar resultados de uma tabela PDF (o arquivo é apenas consultado e descartado em seguida)"
-                          >
-                            <FileUp className="w-3.5 h-3.5" />
-                            <span>{importingPdf ? 'Lendo PDF...' : 'Importar PDF'}</span>
-                          </button>
-                        </>
-                      )}
+                    {/* Barra de Ações do Grupo */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-800/80">
+                      {/* Ações Utilitárias e de Gestão */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {activeGroup.status === 'ABERTO' && (
+                          <>
+                            <input
+                              ref={pdfImportInputRef}
+                              type="file"
+                              accept="application/pdf,.pdf"
+                              onChange={handleImportGroupPdf}
+                              className="hidden"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => pdfImportInputRef.current?.click()}
+                              disabled={importingPdf}
+                              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-slate-950 hover:bg-slate-800 disabled:opacity-50 border border-slate-700/80 text-slate-200 text-xs font-semibold shadow-xs transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
+                              title="Importar resultados de uma tabela PDF (o arquivo é apenas consultado e descartado em seguida)"
+                            >
+                              <FileUp className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                              <span>{importingPdf ? 'Lendo PDF...' : 'Importar PDF'}</span>
+                            </button>
+                          </>
+                        )}
 
-                      {canManageMarkers && (
                         <button
                           type="button"
-                          onClick={() => openEditGroupModal(activeGroup)}
-                          className="px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-extrabold flex items-center space-x-1.5 transition"
-                          title="Editar informações, atividade e participantes do grupo (Administrador)"
+                          onClick={() => handlePrintGroupResults(activeGroup)}
+                          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700/80 text-slate-200 text-xs font-semibold shadow-xs transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
+                          title="Imprimir resultado consolidado do grupo"
                         >
-                          <Edit className="w-3.5 h-3.5" />
-                          <span>Editar Grupo</span>
+                          <Printer className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                          <span>Imprimir</span>
                         </button>
-                      )}
 
-                      {canManageMarkers && activeGroup.status === 'ENCERRADO' && (
-                        confirmReopenGroupId === activeGroup.id ? (
-                          <div className="flex items-center space-x-1 bg-amber-950/60 border border-amber-500/40 rounded-xl px-2 py-1">
-                            <span className="text-[11px] font-bold text-amber-200 px-1">Reabrir grupo?</span>
-                            <button
-                              type="button"
-                              onClick={() => handleReopenGroup(activeGroup.id)}
-                              className="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 text-[11px] font-extrabold"
-                            >
-                              Sim, Reabrir
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmReopenGroupId(null)}
-                              className="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-bold"
-                            >
-                              Não
-                            </button>
-                          </div>
-                        ) : (
+                        {canManageMarkers && (
                           <button
                             type="button"
-                            onClick={() => setConfirmReopenGroupId(activeGroup.id)}
-                            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-extrabold flex items-center space-x-1.5 transition"
-                            title="Reabrir grupo arquivado para editar lançamentos (Administrador)"
+                            onClick={() => openEditGroupModal(activeGroup)}
+                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700/80 text-slate-200 text-xs font-semibold shadow-xs transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
+                            title="Editar informações, atividade e participantes do grupo (Administrador)"
                           >
-                            <RefreshCw className="w-3.5 h-3.5" />
-                            <span>Reabrir</span>
+                            <Edit className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span>Editar Grupo</span>
                           </button>
-                        )
-                      )}
+                        )}
 
-                      <button
-                        type="button"
-                        onClick={() => handlePrintGroupResults(activeGroup)}
-                        className="px-3.5 py-2 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 text-xs font-extrabold flex items-center space-x-1.5 transition"
-                        title="Imprimir resultado consolidado do grupo"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        <span>Imprimir Resultado</span>
-                      </button>
+                        {canManageMarkers && activeGroup.status === 'ENCERRADO' && (
+                          confirmReopenGroupId === activeGroup.id ? (
+                            <div className="inline-flex items-center gap-1.5 h-9 bg-amber-950/60 border border-amber-500/40 rounded-lg px-2 shrink-0">
+                              <span className="text-[11px] font-bold text-amber-200 px-1 whitespace-nowrap">
+                                Reabrir grupo?
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleReopenGroup(activeGroup.id)}
+                                className="px-2.5 py-1 rounded-md bg-amber-500 hover:brightness-105 text-slate-950 text-[11px] font-bold transition whitespace-nowrap cursor-pointer"
+                              >
+                                Sim
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmReopenGroupId(null)}
+                                className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition whitespace-nowrap cursor-pointer"
+                              >
+                                Não
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmReopenGroupId(activeGroup.id)}
+                              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700/80 text-slate-200 text-xs font-semibold shadow-xs transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
+                              title="Reabrir grupo arquivado para editar lançamentos (Administrador)"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              <span>Reabrir</span>
+                            </button>
+                          )
+                        )}
+                      </div>
 
+                      {/* Ações Principais de Lançamento e Ciclo de Vida */}
                       {activeGroup.status === 'ABERTO' && (
-                        <>
+                        <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
                             onClick={handleSaveGroupResults}
                             disabled={savingResults}
-                            className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-extrabold flex items-center space-x-1.5 transition"
+                            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-amber-500 hover:brightness-105 active:brightness-95 disabled:opacity-50 text-slate-950 text-xs font-bold shadow-sm transition whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
                           >
-                            <Save className="w-3.5 h-3.5" />
+                            <Save className="w-3.5 h-3.5 shrink-0" />
                             <span>{savingResults ? 'Salvando...' : 'Salvar Resultados'}</span>
                           </button>
 
                           {confirmCloseGroupId === activeGroup.id ? (
-                            <div className="flex items-center space-x-1 bg-emerald-950/60 border border-emerald-500/40 rounded-xl px-2 py-1">
-                              <span className="text-[11px] font-bold text-emerald-200 px-1">Arquivar grupo?</span>
+                            <div className="inline-flex items-center gap-1.5 h-9 bg-emerald-950/60 border border-emerald-500/40 rounded-lg px-2 shrink-0">
+                              <span className="text-[11px] font-bold text-emerald-200 px-1 whitespace-nowrap">
+                                Arquivar grupo?
+                              </span>
                               <button
                                 type="button"
                                 onClick={() => handleCloseGroup(activeGroup.id)}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 text-[11px] font-extrabold"
+                                className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition whitespace-nowrap cursor-pointer"
                               >
                                 Sim, Encerrar
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setConfirmCloseGroupId(null)}
-                                className="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-bold"
+                                className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition whitespace-nowrap cursor-pointer"
                               >
                                 Não
                               </button>
@@ -2239,26 +2252,26 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                             <button
                               type="button"
                               onClick={() => setConfirmCloseGroupId(activeGroup.id)}
-                              className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold flex items-center space-x-1.5 transition"
+                              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-emerald-500/12 hover:bg-emerald-500/20 border border-emerald-500/35 text-emerald-300 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
                             >
-                              <Archive className="w-3.5 h-3.5" />
+                              <Archive className="w-3.5 h-3.5 shrink-0" />
                               <span>Encerrar e Arquivar</span>
                             </button>
                           )}
 
                           {confirmDeleteGroupId === activeGroup.id ? (
-                            <div className="flex items-center space-x-1">
+                            <div className="inline-flex items-center gap-1.5 h-9 bg-rose-950/50 border border-rose-500/40 rounded-lg px-2 shrink-0">
                               <button
                                 type="button"
                                 onClick={() => handleDeleteGroup(activeGroup.id)}
-                                className="px-2.5 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-bold"
+                                className="px-2.5 py-1 rounded-md bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold transition whitespace-nowrap cursor-pointer"
                               >
                                 Confirmar Exclusão
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setConfirmDeleteGroupId(null)}
-                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs font-bold"
+                                className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition whitespace-nowrap cursor-pointer"
                               >
                                 Cancelar
                               </button>
@@ -2267,13 +2280,14 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                             <button
                               type="button"
                               onClick={() => setConfirmDeleteGroupId(activeGroup.id)}
-                              className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                              className="inline-flex items-center justify-center h-9 w-9 rounded-lg bg-slate-950 hover:bg-rose-500/15 border border-slate-700/80 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/50"
                               title="Excluir grupo aberto"
+                              aria-label="Excluir grupo aberto"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           )}
-                        </>
+                        </div>
                       )}
                     </div>
                   </div>
