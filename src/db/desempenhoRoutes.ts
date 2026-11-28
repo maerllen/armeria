@@ -624,13 +624,18 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
         error: 'Selecione o fator de distribuição de pontuação válido.'
       };
     }
-    if (categoria === 'FISICO' && fatorDistribuicao !== 'MARCA' && fatorDistribuicao !== 'TEMPO') {
+    if (
+      categoria === 'FISICO' &&
+      fatorDistribuicao !== 'MARCA' &&
+      fatorDistribuicao !== 'TEMPO' &&
+      fatorDistribuicao !== 'MARCA_TEMPO'
+    ) {
       return {
         ok: false,
-        error: 'Para marcadores Físicos, utilize distribuição por Tipo de Marca ou Tempo.'
+        error: 'Para marcadores Físicos, utilize distribuição por Tipo de Marca, Tempo ou Mista (Marca + Tempo).'
       };
     }
-    if (categoria === 'TATICO' && fatorDistribuicao === 'MARCA') {
+    if (categoria === 'TATICO' && (fatorDistribuicao === 'MARCA' || fatorDistribuicao === 'MARCA_TEMPO')) {
       return {
         ok: false,
         error: 'Para marcadores Táticos, utilize distribuição por Acertos, Tiros/Acertos por Tempo ou Tempo.'
@@ -658,6 +663,9 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
     }
 
     const seenKeys = new Set<string>();
+    let hasTempoRule = false;
+    let hasMarcaRule = false;
+
     for (let idx = 0; idx < rawRules.length; idx++) {
       const r = rawRules[idx];
       const pts = toOptionalFloat(r?.pontos);
@@ -696,6 +704,37 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
           tempoSegundos: Math.round(tSec * 100) / 100,
           pontos: Math.round(pts * 100) / 100
         });
+      } else if (fatorDistribuicao === 'MARCA_TEMPO') {
+        const ruleTipo: 'MARCA' | 'TEMPO' =
+          String(r?.tipo || '').trim().toUpperCase() === 'TEMPO' ? 'TEMPO' : 'MARCA';
+        if (ruleTipo === 'TEMPO') {
+          hasTempoRule = true;
+          if (!usaTempo) {
+            return {
+              ok: false,
+              error: 'Ative o controle de tempo para incluir divisões contabilizando tempo.'
+            };
+          }
+        } else {
+          hasMarcaRule = true;
+        }
+        const v = ruleTipo === 'TEMPO' ? toOptionalInt(r?.valor) : toOptionalFloat(r?.valor);
+        if (v === null || v < 0) {
+          return { ok: false, error: `Informe um valor válido na divisão #${idx + 1}.` };
+        }
+        const valKey = `${ruleTipo}:${v}`;
+        if (seenKeys.has(valKey)) {
+          return {
+            ok: false,
+            error: `Valor duplicado para ${ruleTipo === 'TEMPO' ? 'Tempo' : 'Marca'} na distribuição de pontuação (divisão #${idx + 1}). Informe valores distintos.`
+          };
+        }
+        seenKeys.add(valKey);
+        regrasDistribuicao.push({
+          tipo: ruleTipo,
+          valor: Math.round(v * 100) / 100,
+          pontos: Math.round(pts * 100) / 100
+        });
       } else {
         const v =
           fatorDistribuicao === 'TEMPO' || fatorDistribuicao === 'ACERTOS'
@@ -725,7 +764,23 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
       }
     }
 
-    if (fatorDistribuicao === 'TIROS_TEMPO') {
+    if (fatorDistribuicao === 'MARCA_TEMPO') {
+      // Se todas as faixas forem do mesmo tipo, normaliza o fator automaticamente
+      if (hasTempoRule && !hasMarcaRule) {
+        fatorDistribuicao = 'TEMPO';
+        regrasDistribuicao = regrasDistribuicao.map(({ valor, pontos }) => ({ valor, pontos }));
+        regrasDistribuicao.sort((a, b) => a.valor - b.valor);
+      } else if (hasMarcaRule && !hasTempoRule) {
+        fatorDistribuicao = 'MARCA';
+        regrasDistribuicao = regrasDistribuicao.map(({ valor, pontos }) => ({ valor, pontos }));
+        regrasDistribuicao.sort((a, b) => a.valor - b.valor);
+      } else {
+        regrasDistribuicao.sort(
+          (a, b) =>
+            (a.tipo === 'TEMPO' ? 0 : 1) - (b.tipo === 'TEMPO' ? 0 : 1) || a.valor - b.valor
+        );
+      }
+    } else if (fatorDistribuicao === 'TIROS_TEMPO') {
       regrasDistribuicao.sort((a, b) => computeTierRate(a) - computeTierRate(b));
     } else {
       regrasDistribuicao.sort((a, b) => a.valor - b.valor);
@@ -1660,7 +1715,8 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
           aprovado = 0;
         } else {
           valorMarca = toOptionalFloat(item?.valorMarca);
-          const acceptsTime = usaTempo || fatorDistribuicao === 'TIROS_TEMPO';
+          const acceptsTime =
+            usaTempo || fatorDistribuicao === 'TIROS_TEMPO' || fatorDistribuicao === 'MARCA_TEMPO';
           const parsedTime = acceptsTime ? toOptionalFloat(item?.tempoSegundos) : null;
           tempoSegundos = parsedTime !== null && parsedTime >= 0 ? Math.round(parsedTime * 100) / 100 : null;
           tirosEfetuados = teveTiro ? toOptionalInt(item?.tirosEfetuados ?? marker.QUANTIDADE_TIROS) : null;

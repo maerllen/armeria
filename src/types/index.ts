@@ -2396,9 +2396,11 @@ export type TipoArmaDesempenho = 'Fuzil' | 'Pistola' | 'Espingarda' | 'Submetral
 export type ModoLancamentoDesempenho = 'INDIVIDUAL' | 'COLETIVO';
 export type StatusGrupoDesempenho = 'ABERTO' | 'ENCERRADO';
 export type TempoAprovacaoModo = 'MENOR_IGUAL' | 'MAIOR_IGUAL';
-export type FatorDistribuicaoNota = 'MARCA' | 'TEMPO' | 'ACERTOS' | 'TIROS_TEMPO';
+export type FatorDistribuicaoNota = 'MARCA' | 'TEMPO' | 'MARCA_TEMPO' | 'ACERTOS' | 'TIROS_TEMPO';
+export type TipoFaixaDistribuicao = 'MARCA' | 'TEMPO';
 
 export interface DesempenhoDistribuicaoFaixa {
+  tipo?: TipoFaixaDistribuicao; // Usado em MARCA_TEMPO para combinar faixas de Tempo e Repetição/Marca no mesmo índice
   valor: number; // MARCA: unidade de medida; TEMPO: segundos; ACERTOS: qtd acertos; TIROS_TEMPO: qtd tiros/acertos
   tempoSegundos?: number | null; // Usado em TIROS_TEMPO (ex: 2 tiros em 1 segundo -> valor: 2, tempoSegundos: 1)
   pontos: number; // Pontuação/nota correspondente à faixa

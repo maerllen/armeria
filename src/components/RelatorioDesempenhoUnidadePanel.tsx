@@ -131,6 +131,7 @@ interface ParticipantAbsenceDraft {
 }
 
 interface DraftDistributionTier {
+  tipo: 'MARCA' | 'TEMPO';
   valor: string;
   tempoSegundos: string;
   pontos: string;
@@ -235,7 +236,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   const [mUsaDistribuicao, setMUsaDistribuicao] = useState(false);
   const [mFatorDistribuicao, setMFatorDistribuicao] = useState<FatorDistribuicaoNota>('MARCA');
   const [mRegrasDistribuicao, setMRegrasDistribuicao] = useState<DraftDistributionTier[]>([
-    { valor: '', tempoSegundos: '1', pontos: '' }
+    { tipo: 'MARCA', valor: '', tempoSegundos: '1', pontos: '' }
   ]);
   const [mDificuldade, setMDificuldade] = useState<DificuldadeDesempenho>('Médio');
   const [mTeveTiro, setMTeveTiro] = useState(false);
@@ -420,7 +421,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     setMNotaAprov('6');
     setMUsaDistribuicao(false);
     setMFatorDistribuicao(categoria === 'FISICO' ? 'MARCA' : 'ACERTOS');
-    setMRegrasDistribuicao([{ valor: '', tempoSegundos: '1', pontos: '' }]);
+    setMRegrasDistribuicao([{ tipo: 'MARCA', valor: '', tempoSegundos: '1', pontos: '' }]);
     setMDificuldade('Médio');
     setMTeveTiro(false);
     setMTipoArma('Pistola');
@@ -453,12 +454,23 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     setMFatorDistribuicao(fator);
     setMRegrasDistribuicao(
       hasDist && m.regrasDistribuicao
-        ? m.regrasDistribuicao.map(r => ({
-            valor: fator === 'TEMPO' ? secondsToInputString(r.valor) : String(r.valor),
-            tempoSegundos: r.tempoSegundos != null ? String(r.tempoSegundos).replace('.', ',') : '1',
-            pontos: String(r.pontos)
-          }))
-        : [{ valor: '', tempoSegundos: '1', pontos: '' }]
+        ? m.regrasDistribuicao.map(r => {
+            const rowTipo: 'MARCA' | 'TEMPO' =
+              fator === 'TEMPO'
+                ? 'TEMPO'
+                : fator === 'MARCA_TEMPO'
+                ? r.tipo === 'TEMPO'
+                  ? 'TEMPO'
+                  : 'MARCA'
+                : 'MARCA';
+            return {
+              tipo: rowTipo,
+              valor: rowTipo === 'TEMPO' ? secondsToInputString(r.valor) : String(r.valor),
+              tempoSegundos: r.tempoSegundos != null ? String(r.tempoSegundos).replace('.', ',') : '1',
+              pontos: String(r.pontos)
+            };
+          })
+        : [{ tipo: fator === 'TEMPO' ? 'TEMPO' : 'MARCA', valor: '', tempoSegundos: '1', pontos: '' }]
     );
     setMDificuldade((m.dificuldade as DificuldadeDesempenho) || 'Médio');
     setMTeveTiro(m.teveTiro);
@@ -479,11 +491,12 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     const parsed = parseInt(countRaw.replace(/\D/g, ''), 10);
     if (!Number.isFinite(parsed)) return;
     const count = Math.max(1, Math.min(30, parsed));
+    const defaultTipo: 'MARCA' | 'TEMPO' = mFatorDistribuicao === 'TEMPO' ? 'TEMPO' : 'MARCA';
     setMRegrasDistribuicao(prev => {
       if (prev.length === count) return prev;
       if (prev.length > count) return prev.slice(0, count);
       const next = [...prev];
-      while (next.length < count) next.push({ valor: '', tempoSegundos: '1', pontos: '' });
+      while (next.length < count) next.push({ tipo: defaultTipo, valor: '', tempoSegundos: '1', pontos: '' });
       return next;
     });
   };
@@ -534,29 +547,44 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     }
 
     const canDistribute = mCategoria === 'FISICO' || (mCategoria === 'TATICO' && (mTeveTiro || mUsaTempo));
-    let regrasParsed: Array<{ valor: number; tempoSegundos?: number; pontos: number }> = [];
+    let resolvedFatorDist: FatorDistribuicaoNota | null =
+      canDistribute && mUsaDistribuicao ? mFatorDistribuicao : null;
+    let regrasParsed: Array<{ tipo?: 'MARCA' | 'TEMPO'; valor: number; tempoSegundos?: number; pontos: number }> = [];
     if (canDistribute && mUsaDistribuicao) {
-      if (mFatorDistribuicao === 'TEMPO' && !mUsaTempo) {
-        notify('error', 'Ative o controle de tempo para distribuir pontuação por tempo.');
+      if (mCategoria === 'FISICO') {
+        const hasTempoRows = mRegrasDistribuicao.some(r => r.tipo === 'TEMPO');
+        const hasMarcaRows = mRegrasDistribuicao.some(r => r.tipo !== 'TEMPO');
+        if (hasTempoRows && hasMarcaRows) {
+          resolvedFatorDist = 'MARCA_TEMPO';
+        } else if (hasTempoRows) {
+          resolvedFatorDist = 'TEMPO';
+        } else {
+          resolvedFatorDist = 'MARCA';
+        }
+      }
+
+      if ((resolvedFatorDist === 'TEMPO' || resolvedFatorDist === 'MARCA_TEMPO') && !mUsaTempo) {
+        notify('error', 'Ative o controle de tempo para distribuir pontuação contabilizando tempo.');
         return;
       }
-      if ((mFatorDistribuicao === 'ACERTOS' || mFatorDistribuicao === 'TIROS_TEMPO') && !(mCategoria === 'TATICO' && mTeveTiro)) {
+      if ((resolvedFatorDist === 'ACERTOS' || resolvedFatorDist === 'TIROS_TEMPO') && !(mCategoria === 'TATICO' && mTeveTiro)) {
         notify('error', 'Ative "Teve tiro de arma de fogo" para distribuir pontuação por acertos ou tiros por segundo.');
         return;
       }
       for (let i = 0; i < mRegrasDistribuicao.length; i++) {
         const row = mRegrasDistribuicao[i];
-        const v =
-          mFatorDistribuicao === 'TEMPO'
-            ? parseTimeInputToSeconds(row.valor)
-            : row.valor.trim() !== '' && Number.isFinite(Number(row.valor.trim().replace(',', '.')))
-            ? Number(row.valor.trim().replace(',', '.'))
-            : null;
+        const rowIsTempo =
+          resolvedFatorDist === 'TEMPO' || (resolvedFatorDist === 'MARCA_TEMPO' && row.tipo === 'TEMPO');
+        const v = rowIsTempo
+          ? parseTimeInputToSeconds(row.valor)
+          : row.valor.trim() !== '' && Number.isFinite(Number(row.valor.trim().replace(',', '.')))
+          ? Number(row.valor.trim().replace(',', '.'))
+          : null;
         const pts =
           row.pontos.trim() !== '' && Number.isFinite(Number(row.pontos.trim().replace(',', '.')))
             ? Number(row.pontos.trim().replace(',', '.'))
             : null;
-        if (v === null || v < 0 || (mFatorDistribuicao === 'TIROS_TEMPO' && v <= 0)) {
+        if (v === null || v < 0 || (resolvedFatorDist === 'TIROS_TEMPO' && v <= 0)) {
           notify('error', `Informe um valor válido na divisão #${i + 1} da distribuição de pontuação.`);
           return;
         }
@@ -564,7 +592,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
           notify('error', `Informe uma pontuação válida na divisão #${i + 1}.`);
           return;
         }
-        if (mFatorDistribuicao === 'TIROS_TEMPO') {
+        if (resolvedFatorDist === 'TIROS_TEMPO') {
           const tSec =
             row.tempoSegundos.trim() !== '' && Number.isFinite(Number(row.tempoSegundos.trim().replace(',', '.')))
               ? Number(row.tempoSegundos.trim().replace(',', '.'))
@@ -574,6 +602,8 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
             return;
           }
           regrasParsed.push({ valor: v, tempoSegundos: tSec, pontos: pts });
+        } else if (resolvedFatorDist === 'MARCA_TEMPO') {
+          regrasParsed.push({ tipo: row.tipo === 'TEMPO' ? 'TEMPO' : 'MARCA', valor: v, pontos: pts });
         } else {
           regrasParsed.push({ valor: v, pontos: pts });
         }
@@ -599,7 +629,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       notaMaxima: Number(mNotaMax.replace(',', '.')),
       notaAprovacao: Number(mNotaAprov.replace(',', '.')),
       usaDistribuicaoNota: canDistribute ? mUsaDistribuicao : false,
-      fatorDistribuicao: canDistribute && mUsaDistribuicao ? mFatorDistribuicao : null,
+      fatorDistribuicao: canDistribute && mUsaDistribuicao ? resolvedFatorDist : null,
       regrasDistribuicao: canDistribute && mUsaDistribuicao ? regrasParsed : [],
       dificuldade: mDificuldade,
       teveTiro: mCategoria === 'TATICO' ? mTeveTiro : false,
@@ -827,7 +857,8 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
         const valRaw = cell.valorMarca.trim().replace(',', '.');
         const valorMarca = valRaw !== '' && Number.isFinite(Number(valRaw)) ? Number(valRaw) : null;
         const isShotRateMode = m.usaDistribuicaoNota && m.fatorDistribuicao === 'TIROS_TEMPO';
-        const acceptsTime = m.usaTempo || isShotRateMode;
+        const isMixedMode = m.usaDistribuicaoNota && m.fatorDistribuicao === 'MARCA_TEMPO';
+        const acceptsTime = m.usaTempo || isShotRateMode || isMixedMode;
         const tempoSegundos = acceptsTime ? parseTimeInputToSeconds(cell.tempoInput, isShotRateMode) : null;
         const acertosRaw = (cell.acertosTiros || '').trim();
         const acertosTiros =
@@ -1624,11 +1655,12 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   m.regrasDistribuicao &&
                                   m.regrasDistribuicao.length > 0
                               );
-                              const isMarcaDriver = hasAutoDist && m.fatorDistribuicao === 'MARCA';
-                              const isTempoDriver = hasAutoDist && m.fatorDistribuicao === 'TEMPO';
+                              const isMixedDriver = hasAutoDist && m.fatorDistribuicao === 'MARCA_TEMPO';
+                              const isMarcaDriver = hasAutoDist && (m.fatorDistribuicao === 'MARCA' || isMixedDriver);
+                              const isTempoDriver = hasAutoDist && (m.fatorDistribuicao === 'TEMPO' || isMixedDriver);
                               const isAcertosDriver = hasAutoDist && m.fatorDistribuicao === 'ACERTOS';
                               const isShotRateDriver = hasAutoDist && m.fatorDistribuicao === 'TIROS_TEMPO';
-                              const needsTimeInput = Boolean(m.usaTempo || isShotRateDriver);
+                              const needsTimeInput = Boolean(m.usaTempo || isShotRateDriver || isMixedDriver);
 
                               const timeSec = needsTimeInput
                                 ? parseTimeInputToSeconds(cell.tempoInput, isShotRateDriver)
@@ -1743,6 +1775,8 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                         Cálculo automático (
                                         {m.fatorDistribuicao === 'TEMPO'
                                           ? 'por Tempo'
+                                          : m.fatorDistribuicao === 'MARCA_TEMPO'
+                                          ? `Misto — Tempo e ${m.unidadeMedida || m.tipoMarca}`
                                           : m.fatorDistribuicao === 'ACERTOS'
                                           ? 'por Acertos'
                                           : m.fatorDistribuicao === 'TIROS_TEMPO'
@@ -1752,8 +1786,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                       </span>
                                       {m.regrasDistribuicao.map((r, rIdx) => (
                                         <span key={rIdx} className="text-slate-200">
-                                          {m.fatorDistribuicao === 'TEMPO'
-                                            ? `${tempoOp} ${formatSecondsCompact(r.valor)}`
+                                          {m.fatorDistribuicao === 'TEMPO' ||
+                                          (m.fatorDistribuicao === 'MARCA_TEMPO' && r.tipo === 'TEMPO')
+                                            ? `Tempo ${tempoOp} ${formatSecondsCompact(r.valor)}`
                                             : m.fatorDistribuicao === 'ACERTOS'
                                             ? `${formatNumberBr(r.valor)} acertos`
                                             : m.fatorDistribuicao === 'TIROS_TEMPO'
@@ -1891,7 +1926,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                           isParticipantAbsent
                                             ? 'Ausente'
                                             : hasAutoDist
-                                            ? isTempoDriver
+                                            ? isMixedDriver
+                                              ? `Informe ${m.unidadeMedida || 'marca'} e/ou tempo`
+                                              : isTempoDriver
                                               ? 'Informe o tempo'
                                               : isAcertosDriver
                                               ? 'Informe os acertos'
@@ -1908,7 +1945,20 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                       />
                                       {hasAutoDist && !isParticipantAbsent && distResult.hasInput && (
                                         <div className="text-[10px] text-emerald-300/90 mt-0.5">
-                                          {distResult.matchedTier
+                                          {m.fatorDistribuicao === 'MARCA_TEMPO'
+                                            ? distResult.matchedTempoTier || distResult.matchedMarcaTier
+                                              ? `${[
+                                                  distResult.matchedTempoTier
+                                                    ? `Tempo ${tempoOp} ${formatSecondsCompact(distResult.matchedTempoTier.valor)} (${formatNumberBr(distResult.matchedTempoTier.pontos)} pts)`
+                                                    : null,
+                                                  distResult.matchedMarcaTier
+                                                    ? `${formatNumberBr(distResult.matchedMarcaTier.valor)} ${m.unidadeMedida || ''} (${formatNumberBr(distResult.matchedMarcaTier.pontos)} pts)`
+                                                    : null
+                                                ]
+                                                  .filter(Boolean)
+                                                  .join(' + ')} → ${formatNumberBr(distResult.nota ?? 0)} pts`
+                                              : `Abaixo da 1ª faixa → Nota mín. (${formatNumberBr(m.notaMinima)})`
+                                            : distResult.matchedTier
                                             ? m.fatorDistribuicao === 'TEMPO'
                                               ? `Faixa ${tempoOp} ${formatSecondsCompact(distResult.matchedTier.valor)} → ${formatNumberBr(distResult.nota ?? 0)} pts`
                                               : m.fatorDistribuicao === 'ACERTOS'
@@ -2121,6 +2171,8 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                           Distribuição de Pontos (
                           {m.fatorDistribuicao === 'TEMPO'
                             ? 'por Tempo'
+                            : m.fatorDistribuicao === 'MARCA_TEMPO'
+                            ? `Mista — Tempo e ${m.tipoMarca || 'Marca'} (${m.unidadeMedida || ''})`
                             : m.fatorDistribuicao === 'ACERTOS'
                             ? 'por Acertos'
                             : m.fatorDistribuicao === 'TIROS_TEMPO'
@@ -2129,21 +2181,41 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                           ):
                         </span>
                         <div className="flex flex-wrap gap-1.5">
-                          {m.regrasDistribuicao.map((r, rIdx) => (
-                            <span
-                              key={rIdx}
-                              className="px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-[10px] text-slate-200"
-                            >
-                              {m.fatorDistribuicao === 'TEMPO'
-                                ? `${normalizeTempoAprovacaoModo(m.tempoAprovacaoModo) === 'MAIOR_IGUAL' ? '≥' : '≤'} ${formatSecondsCompact(r.valor)}`
-                                : m.fatorDistribuicao === 'ACERTOS'
-                                ? `${formatNumberBr(r.valor)} acertos`
-                                : m.fatorDistribuicao === 'TIROS_TEMPO'
-                                ? `${formatNumberBr(r.valor)} tiro(s) em ${formatNumberBr(r.tempoSegundos ?? 1)}s (${formatNumberBr(computeTierRate(r) ?? 0)}/s)`
-                                : `${formatNumberBr(r.valor)} ${m.unidadeMedida || ''}`}{' '}
-                              = <strong className="text-amber-300">{formatNumberBr(r.pontos)} pts</strong>
-                            </span>
-                          ))}
+                          {m.regrasDistribuicao.map((r, rIdx) => {
+                            const isRowTempo =
+                              m.fatorDistribuicao === 'TEMPO' ||
+                              (m.fatorDistribuicao === 'MARCA_TEMPO' && r.tipo === 'TEMPO');
+                            return (
+                              <span
+                                key={rIdx}
+                                className={`px-2 py-0.5 rounded bg-slate-950 border text-[10px] text-slate-200 ${
+                                  m.fatorDistribuicao === 'MARCA_TEMPO'
+                                    ? isRowTempo
+                                      ? 'border-sky-500/40'
+                                      : 'border-emerald-500/40'
+                                    : 'border-slate-700'
+                                }`}
+                              >
+                                {m.fatorDistribuicao === 'MARCA_TEMPO' && (
+                                  <span
+                                    className={`font-bold mr-1 ${
+                                      isRowTempo ? 'text-sky-300' : 'text-emerald-300'
+                                    }`}
+                                  >
+                                    [{isRowTempo ? 'Tempo' : m.tipoMarca || 'Marca'}]
+                                  </span>
+                                )}
+                                {isRowTempo
+                                  ? `${normalizeTempoAprovacaoModo(m.tempoAprovacaoModo) === 'MAIOR_IGUAL' ? '≥' : '≤'} ${formatSecondsCompact(r.valor)}`
+                                  : m.fatorDistribuicao === 'ACERTOS'
+                                  ? `${formatNumberBr(r.valor)} acertos`
+                                  : m.fatorDistribuicao === 'TIROS_TEMPO'
+                                  ? `${formatNumberBr(r.valor)} tiro(s) em ${formatNumberBr(r.tempoSegundos ?? 1)}s (${formatNumberBr(computeTierRate(r) ?? 0)}/s)`
+                                  : `${formatNumberBr(r.valor)} ${m.unidadeMedida || ''}`}{' '}
+                                = <strong className="text-amber-300">{formatNumberBr(r.pontos)} pts</strong>
+                              </span>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -2353,8 +2425,11 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                   onChange={e => {
                     const checked = e.target.checked;
                     setMUsaTempo(checked);
-                    if (!checked && mFatorDistribuicao === 'TEMPO') {
+                    if (!checked && (mFatorDistribuicao === 'TEMPO' || mFatorDistribuicao === 'MARCA_TEMPO')) {
                       setMFatorDistribuicao('MARCA');
+                      setMRegrasDistribuicao(prev =>
+                        prev.map(r => (r.tipo === 'TEMPO' ? { ...r, tipo: 'MARCA', valor: '' } : r))
+                      );
                     }
                   }}
                   className="rounded border-slate-600 text-amber-500 focus:ring-amber-500"
@@ -2545,7 +2620,14 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                             }
                           }
                           if (mRegrasDistribuicao.length === 0) {
-                            setMRegrasDistribuicao([{ valor: '', tempoSegundos: '1', pontos: '' }]);
+                            setMRegrasDistribuicao([
+                              {
+                                tipo: mFatorDistribuicao === 'TEMPO' ? 'TEMPO' : 'MARCA',
+                                valor: '',
+                                tempoSegundos: '1',
+                                pontos: ''
+                              }
+                            ]);
                           }
                         }
                       }}
@@ -2575,12 +2657,27 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                             onChange={e => {
                               const nextFator = e.target.value as FatorDistribuicaoNota;
                               setMFatorDistribuicao(nextFator);
-                              if (nextFator === 'TEMPO' && !mUsaTempo) {
+                              if ((nextFator === 'TEMPO' || nextFator === 'MARCA_TEMPO') && !mUsaTempo) {
                                 setMUsaTempo(true);
                               }
-                              setMRegrasDistribuicao(prev =>
-                                prev.map(r => ({ valor: '', tempoSegundos: '1', pontos: r.pontos }))
-                              );
+                              if (nextFator === 'MARCA_TEMPO') {
+                                // Mantém as faixas já digitadas (ex: ao editar um índice por Repetição para adicionar faixas de Tempo)
+                                setMRegrasDistribuicao(prev =>
+                                  prev.length > 0
+                                    ? prev
+                                    : [{ tipo: 'MARCA', valor: '', tempoSegundos: '1', pontos: '' }]
+                                );
+                              } else {
+                                const targetRowTipo: 'MARCA' | 'TEMPO' = nextFator === 'TEMPO' ? 'TEMPO' : 'MARCA';
+                                setMRegrasDistribuicao(prev =>
+                                  prev.map(r => ({
+                                    tipo: targetRowTipo,
+                                    valor: r.tipo === targetRowTipo ? r.valor : '',
+                                    tempoSegundos: '1',
+                                    pontos: r.pontos
+                                  }))
+                                );
+                              }
                             }}
                             className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-400"
                           >
@@ -2590,6 +2687,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   {mTipoMarca} ({mUnidadeMedida.trim() || mTipoMarca})
                                 </option>
                                 <option value="TEMPO">Tempo (MM:SS)</option>
+                                <option value="MARCA_TEMPO">
+                                  Mista — {mTipoMarca} ({mUnidadeMedida.trim() || mTipoMarca}) e Tempo (MM:SS)
+                                </option>
                               </>
                             ) : (
                               <>
@@ -2625,34 +2725,108 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       </div>
 
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-300">
-                            Tabela de Divisões (
-                            {mFatorDistribuicao === 'TEMPO'
-                              ? 'Tempo → Pontos'
-                              : mFatorDistribuicao === 'ACERTOS'
-                              ? 'Acertos → Pontos'
-                              : mFatorDistribuicao === 'TIROS_TEMPO'
-                              ? 'Tiros/Acertos em Tempo (s) → Pontos'
-                              : `${mUnidadeMedida.trim() || mTipoMarca} → Pontos`}
-                            )
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setMRegrasDistribuicao(prev =>
-                                prev.length < 30 ? [...prev, { valor: '', tempoSegundos: '1', pontos: '' }] : prev
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-bold text-slate-300">
+                              Tabela de Divisões (
+                              {mFatorDistribuicao === 'TEMPO'
+                                ? 'Tempo → Pontos'
+                                : mFatorDistribuicao === 'MARCA_TEMPO'
+                                ? `Tempo e ${mUnidadeMedida.trim() || mTipoMarca} → Pontos`
+                                : mFatorDistribuicao === 'ACERTOS'
+                                ? 'Acertos → Pontos'
+                                : mFatorDistribuicao === 'TIROS_TEMPO'
+                                ? 'Tiros/Acertos em Tempo (s) → Pontos'
+                                : `${mUnidadeMedida.trim() || mTipoMarca} → Pontos`}
                               )
-                            }
-                            className="px-2.5 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 text-[11px] font-bold flex items-center space-x-1"
-                          >
-                            <Plus className="w-3 h-3" />
-                            <span>Adicionar divisão</span>
-                          </button>
+                            </span>
+                            {mCategoria === 'FISICO' && (() => {
+                              const tempoCnt = mRegrasDistribuicao.filter(r => r.tipo === 'TEMPO').length;
+                              const marcaCnt = mRegrasDistribuicao.filter(r => r.tipo !== 'TEMPO').length;
+                              if (tempoCnt > 0 && marcaCnt > 0) {
+                                return (
+                                  <span className="px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/35 text-[10px] font-bold text-sky-300">
+                                    {tempoCnt} Tempo • {marcaCnt} {mTipoMarca}
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </div>
+                          {mCategoria === 'FISICO' ? (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (mRegrasDistribuicao.length >= 30) return;
+                                  const next = [
+                                    ...mRegrasDistribuicao,
+                                    { tipo: 'MARCA' as const, valor: '', tempoSegundos: '1', pontos: '' }
+                                  ];
+                                  setMRegrasDistribuicao(next);
+                                  if (next.some(r => r.tipo === 'TEMPO') && next.some(r => r.tipo === 'MARCA')) {
+                                    setMFatorDistribuicao('MARCA_TEMPO');
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center space-x-1"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>+ {mTipoMarca}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (mRegrasDistribuicao.length >= 30) return;
+                                  if (!mUsaTempo) setMUsaTempo(true);
+                                  const next = [
+                                    ...mRegrasDistribuicao,
+                                    { tipo: 'TEMPO' as const, valor: '', tempoSegundos: '1', pontos: '' }
+                                  ];
+                                  setMRegrasDistribuicao(next);
+                                  if (next.some(r => r.tipo === 'TEMPO') && next.some(r => r.tipo === 'MARCA')) {
+                                    setMFatorDistribuicao('MARCA_TEMPO');
+                                  } else if (mFatorDistribuicao === 'MARCA') {
+                                    setMFatorDistribuicao('MARCA_TEMPO');
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 text-[11px] font-bold flex items-center space-x-1"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>+ Tempo</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setMRegrasDistribuicao(prev =>
+                                  prev.length < 30
+                                    ? [
+                                        ...prev,
+                                        {
+                                          tipo: mFatorDistribuicao === 'TEMPO' ? 'TEMPO' : 'MARCA',
+                                          valor: '',
+                                          tempoSegundos: '1',
+                                          pontos: ''
+                                        }
+                                      ]
+                                    : prev
+                                )
+                              }
+                              className="px-2.5 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 text-[11px] font-bold flex items-center space-x-1"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Adicionar divisão</span>
+                            </button>
+                          )}
                         </div>
 
-                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                        <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
                           {mRegrasDistribuicao.map((tier, idx) => {
+                            const rowIsTempo =
+                              mCategoria === 'FISICO'
+                                ? tier.tipo === 'TEMPO'
+                                : mFatorDistribuicao === 'TEMPO';
                             const previewShots = Number(String(tier.valor || '').replace(',', '.'));
                             const previewSecs = Number(String(tier.tempoSegundos || '').replace(',', '.'));
                             const previewRate =
@@ -2673,7 +2847,70 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   #{idx + 1}
                                 </span>
 
-                                {mFatorDistribuicao === 'TIROS_TEMPO' ? (
+                                {mCategoria === 'FISICO' ? (
+                                  <>
+                                    <div className="col-span-3">
+                                      <select
+                                        value={tier.tipo}
+                                        onChange={e => {
+                                          const nextTipo = e.target.value as 'MARCA' | 'TEMPO';
+                                          if (nextTipo === 'TEMPO' && !mUsaTempo) {
+                                            setMUsaTempo(true);
+                                          }
+                                          setMRegrasDistribuicao(prev => {
+                                            const updated = prev.map((item, i) =>
+                                              i === idx
+                                                ? { ...item, tipo: nextTipo, valor: '' }
+                                                : item
+                                            );
+                                            const hasT = updated.some(r => r.tipo === 'TEMPO');
+                                            const hasM = updated.some(r => r.tipo === 'MARCA');
+                                            if (hasT && hasM) {
+                                              setMFatorDistribuicao('MARCA_TEMPO');
+                                            }
+                                            return updated;
+                                          });
+                                        }}
+                                        className={`w-full bg-slate-950 border rounded-lg px-2 py-1.5 text-[11px] font-bold focus:outline-none ${
+                                          rowIsTempo
+                                            ? 'border-sky-500/50 text-sky-300'
+                                            : 'border-emerald-500/50 text-emerald-300'
+                                        }`}
+                                      >
+                                        <option value="MARCA">{mTipoMarca}</option>
+                                        <option value="TEMPO">Tempo</option>
+                                      </select>
+                                    </div>
+                                    <div className="col-span-3 flex items-center gap-1">
+                                      <input
+                                        type="text"
+                                        inputMode={rowIsTempo ? 'numeric' : 'decimal'}
+                                        value={tier.valor}
+                                        onChange={e => {
+                                          const nextVal = rowIsTempo
+                                            ? maskTimeMMSS(e.target.value)
+                                            : e.target.value;
+                                          setMRegrasDistribuicao(prev =>
+                                            prev.map((item, i) => (i === idx ? { ...item, valor: nextVal } : item))
+                                          );
+                                        }}
+                                        placeholder={
+                                          rowIsTempo
+                                            ? '03:00'
+                                            : mTipoMarca === 'Distância'
+                                            ? 'Ex: 200'
+                                            : 'Ex: 10'
+                                        }
+                                        className={`w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-sky-400 ${
+                                          rowIsTempo ? 'font-mono' : ''
+                                        }`}
+                                      />
+                                      <span className="text-[10px] text-slate-400 shrink-0">
+                                        {rowIsTempo ? 'mm:ss' : mUnidadeMedida.trim() || 'un.'}
+                                      </span>
+                                    </div>
+                                  </>
+                                ) : mFatorDistribuicao === 'TIROS_TEMPO' ? (
                                   <div className="col-span-6 flex flex-wrap sm:flex-nowrap items-center gap-1.5">
                                     <input
                                       type="text"
@@ -2710,19 +2947,18 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   <div className="col-span-5 flex items-center gap-1.5">
                                     <input
                                       type="text"
-                                      inputMode={mFatorDistribuicao === 'TEMPO' ? 'numeric' : 'decimal'}
+                                      inputMode={rowIsTempo ? 'numeric' : 'decimal'}
                                       value={tier.valor}
                                       onChange={e => {
-                                        const nextVal =
-                                          mFatorDistribuicao === 'TEMPO'
-                                            ? maskTimeMMSS(e.target.value)
-                                            : e.target.value;
+                                        const nextVal = rowIsTempo
+                                          ? maskTimeMMSS(e.target.value)
+                                          : e.target.value;
                                         setMRegrasDistribuicao(prev =>
                                           prev.map((item, i) => (i === idx ? { ...item, valor: nextVal } : item))
                                         );
                                       }}
                                       placeholder={
-                                        mFatorDistribuicao === 'TEMPO'
+                                        rowIsTempo
                                           ? '03:00'
                                           : mFatorDistribuicao === 'ACERTOS'
                                           ? 'Ex: 2'
@@ -2731,11 +2967,11 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                           : 'Ex: 3'
                                       }
                                       className={`w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-sky-400 ${
-                                        mFatorDistribuicao === 'TEMPO' ? 'font-mono' : ''
+                                        rowIsTempo ? 'font-mono' : ''
                                       }`}
                                     />
                                     <span className="text-[10px] text-slate-400 shrink-0">
-                                      {mFatorDistribuicao === 'TEMPO'
+                                      {rowIsTempo
                                         ? 'mm:ss'
                                         : mFatorDistribuicao === 'ACERTOS'
                                         ? 'acertos'
@@ -2747,7 +2983,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                 <span className="col-span-1 text-[10px] font-bold text-slate-400 text-center">
                                   vale
                                 </span>
-                                <div className={`${mFatorDistribuicao === 'TIROS_TEMPO' ? 'col-span-3' : 'col-span-4'} flex items-center gap-1.5`}>
+                                <div className={`${mCategoria === 'FISICO' || mFatorDistribuicao === 'TIROS_TEMPO' ? 'col-span-3' : 'col-span-4'} flex items-center gap-1.5`}>
                                   <input
                                     type="text"
                                     inputMode="decimal"
@@ -2782,7 +3018,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                         </div>
 
                         <p className="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-800 rounded-lg px-2.5 py-2">
-                          {mFatorDistribuicao === 'TEMPO'
+                          {mFatorDistribuicao === 'MARCA_TEMPO'
+                            ? `Regra mista (Tempo + ${mTipoMarca}): você pode combinar divisões de Tempo e de ${mTipoMarca} no mesmo índice (ex.: 3 faixas de Tempo e 2 de ${mTipoMarca}). Se ambos forem lançados e a soma das maiores faixas couber na nota máxima, os pontos são somados; caso contrário, aplica-se a maior faixa atingida.`
+                            : mFatorDistribuicao === 'TEMPO'
                             ? mTempoAprovModo === 'MENOR_IGUAL'
                               ? 'Regra (tempo invertido): quanto menor o tempo, melhor a nota. Ex.: se 03:00 = 6 pts e 02:30 = 8 pts, 02:45 vale 6 pts e 02:30 ou menos vale 8 pts.'
                               : 'Regra (tempo normal): quanto maior o tempo, melhor a nota. Ex.: se 01:00 = 5 pts e 02:00 = 8 pts, 01:59 vale 5 pts e 02:00 ou mais vale 8 pts.'
@@ -2790,7 +3028,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                             ? 'Regra (acertos): ex. 2 acertos = 3 pts, 3 acertos = 5 pts. O sistema aplica o degrau exato ou imediatamente anterior aos acertos registrados.'
                             : mFatorDistribuicao === 'TIROS_TEMPO'
                             ? 'Regra cruzada (taxa de acerto por segundo): ex. 2 tiros em 1s (2/s) = 2 pts e 3 tiros em 1s (3/s) = 4 pts. Ao lançar os acertos e o tempo em segundos, o sistema calcula acertos ÷ tempo e aplica a maior faixa atingida.'
-                            : `Regra de degrau: o sistema usa o valor exato ou o último degrau atingido antes do próximo valor (ex.: se 100 ${mUnidadeMedida.trim() || 'un.'} = 3 pts e 200 = 4 pts, 199 continua valendo 3 pts e 201 vale 4 pts). Abaixo da 1ª faixa vale a nota mínima.`}
+                            : `Regra de degrau: o sistema usa o valor exato ou o último degrau atingido antes do próximo valor (ex.: se 100 ${mUnidadeMedida.trim() || 'un.'} = 3 pts e 200 = 4 pts, 199 continua valendo 3 pts e 201 vale 4 pts). Você também pode adicionar divisões de Tempo clicando em "+ Tempo".`}
                         </p>
                       </div>
                     </div>
