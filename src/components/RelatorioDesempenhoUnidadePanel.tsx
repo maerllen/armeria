@@ -222,6 +222,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   const [participantAbsence, setParticipantAbsence] = useState<Record<string, ParticipantAbsenceDraft>>({});
   const [savingResults, setSavingResults] = useState(false);
   const [confirmCloseGroupId, setConfirmCloseGroupId] = useState<string | null>(null);
+  const [confirmReopenGroupId, setConfirmReopenGroupId] = useState<string | null>(null);
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
   const [confirmDeleteActivityId, setConfirmDeleteActivityId] = useState<string | null>(null);
 
@@ -262,6 +263,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
 
   // Modal Atividade
   const [activityModalOpen, setActivityModalOpen] = useState(false);
+  const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
   const [aCategoria, setACategoria] = useState<CategoriaDesempenho>('FISICO');
   const [aNome, setANome] = useState('');
   const [aData, setAData] = useState(getTodayIsoBr());
@@ -270,8 +272,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   const [aMarcadoresIds, setAMarcadoresIds] = useState<string[]>([]);
   const [savingActivity, setSavingActivity] = useState(false);
 
-  // Modal Novo Grupo
+  // Modal Novo / Editar Grupo
   const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [gAtividadeId, setGAtividadeId] = useState('');
   const [gNomeGrupo, setGNomeGrupo] = useState('');
   const [gModo, setGModo] = useState<ModoLancamentoDesempenho>('COLETIVO');
@@ -737,6 +740,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
 
   // Activity Modal
   const openCreateActivityModal = (defaultCat?: CategoriaDesempenho) => {
+    setEditingActivityId(null);
     setACategoria(defaultCat || 'FISICO');
     setANome('');
     setAData(getTodayIsoBr());
@@ -746,9 +750,23 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     setActivityModalOpen(true);
   };
 
+  const openEditActivityModal = (a: DesempenhoAtividade) => {
+    setEditingActivityId(a.id);
+    setACategoria(a.categoria);
+    setANome(a.nome || '');
+    setAData(a.dataAtividade || getTodayIsoBr());
+    setAHora(a.horaAtividade || '08:00');
+    setADescricao(a.descricao || '');
+    setAMarcadoresIds([...(a.marcadoresIds || [])]);
+    setActivityModalOpen(true);
+  };
+
   const markersForActivityCat = useMemo(
-    () => marcadores.filter(m => m.ativo && m.categoria === aCategoria),
-    [marcadores, aCategoria]
+    () =>
+      marcadores.filter(
+        m => m.categoria === aCategoria && (m.ativo || aMarcadoresIds.includes(m.id))
+      ),
+    [marcadores, aCategoria, aMarcadoresIds]
   );
 
   const handleSaveActivity = async (e: React.FormEvent) => {
@@ -767,23 +785,33 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     }
 
     setSavingActivity(true);
-    const res = await storage.createDesempenhoAtividade({
+    const payload = {
       categoria: aCategoria,
       nome: aNome.trim(),
       dataAtividade: aData,
       horaAtividade: aHora,
       descricao: aDescricao.trim(),
       marcadoresIds: aMarcadoresIds
-    });
+    };
+    const res = editingActivityId
+      ? await storage.updateDesempenhoAtividade(editingActivityId, payload)
+      : await storage.createDesempenhoAtividade(payload);
     setSavingActivity(false);
 
     if (!res.success) {
-      notify('error', res.error || 'Erro ao criar atividade.');
+      notify('error', res.error || (editingActivityId ? 'Erro ao atualizar atividade.' : 'Erro ao criar atividade.'));
       return;
     }
+    const wasEditing = Boolean(editingActivityId);
+    setEditingActivityId(null);
     setActivityModalOpen(false);
     setSubTab('ATIVIDADES_GRUPOS');
-    notify('success', `Atividade "${aNome.trim()}" criada com sucesso!`);
+    notify(
+      'success',
+      wasEditing
+        ? `Atividade "${aNome.trim()}" atualizada com sucesso!`
+        : `Atividade "${aNome.trim()}" criada com sucesso!`
+    );
     await loadAll();
   };
 
@@ -801,12 +829,26 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   // Group Modal
   const openCreateGroupModal = (preselectedActivity?: DesempenhoAtividade) => {
     const act = preselectedActivity || atividades[0];
+    setEditingGroupId(null);
     setGAtividadeId(act?.id || '');
     setGNomeGrupo('');
     setGModo('COLETIVO');
     setGData(act?.dataAtividade || getTodayIsoBr());
     setGHora(act?.horaAtividade || '08:00');
     setGParticipantesIds([]);
+    setGUserSearch('');
+    setGUserUnitFilter('TODAS');
+    setGroupModalOpen(true);
+  };
+
+  const openEditGroupModal = (g: DesempenhoGrupo) => {
+    setEditingGroupId(g.id);
+    setGAtividadeId(g.atividadeId || '');
+    setGNomeGrupo(g.nomeGrupo || '');
+    setGModo(g.modoLancamento || 'COLETIVO');
+    setGData(g.dataPrevista || getTodayIsoBr());
+    setGHora(g.horaPrevista || '08:00');
+    setGParticipantesIds((g.participantes || []).map(p => p.usuarioId));
     setGUserSearch('');
     setGUserUnitFilter('TODAS');
     setGroupModalOpen(true);
@@ -847,26 +889,50 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     }
 
     setSavingGroup(true);
-    const res = await storage.createDesempenhoGrupo({
+    const payload = {
       atividadeId: gAtividadeId,
       nomeGrupo: gNomeGrupo.trim() || undefined,
-      modoLancamento: gParticipantesIds.length === 1 ? 'INDIVIDUAL' : gModo,
+      modoLancamento: (gParticipantesIds.length === 1 ? 'INDIVIDUAL' : gModo) as ModoLancamentoDesempenho,
       dataPrevista: gData,
       horaPrevista: gHora,
       participantesIds: gParticipantesIds
-    });
+    };
+    const res = editingGroupId
+      ? await storage.updateDesempenhoGrupo(editingGroupId, payload)
+      : await storage.createDesempenhoGrupo(payload);
     setSavingGroup(false);
 
     if (!res.success) {
-      notify('error', res.error || 'Erro ao criar grupo.');
+      notify('error', res.error || (editingGroupId ? 'Erro ao atualizar grupo.' : 'Erro ao criar grupo.'));
       return;
     }
+    const wasEditing = Boolean(editingGroupId);
+    const targetId = editingGroupId || res.id || null;
+    setEditingGroupId(null);
     setGroupModalOpen(false);
     setSubTab('ATIVIDADES_GRUPOS');
+    if (!wasEditing) setGroupStatusTab('ABERTO');
+    await loadAll();
+    if (targetId) setActiveGroupId(targetId);
+    notify(
+      'success',
+      wasEditing
+        ? 'Informações do grupo atualizadas com sucesso!'
+        : 'Grupo criado! Preencha os valores individuais de cada policial nos marcadores abaixo.'
+    );
+  };
+
+  const handleReopenGroup = async (grupoId: string) => {
+    const res = await storage.reabrirDesempenhoGrupo(grupoId);
+    setConfirmReopenGroupId(null);
+    if (!res.success) {
+      notify('error', res.error || 'Erro ao reabrir grupo.');
+      return;
+    }
     setGroupStatusTab('ABERTO');
     await loadAll();
-    if (res.id) setActiveGroupId(res.id);
-    notify('success', 'Grupo criado! Preencha os valores individuais de cada policial nos marcadores abaixo.');
+    setActiveGroupId(grupoId);
+    notify('success', 'Grupo reaberto com sucesso! Você já pode editar os lançamentos e salvar novamente.');
   };
 
   // Save Individual Results for Active Group
@@ -1869,7 +1935,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 gap-2">
                       <button
                         type="button"
                         onClick={() => openCreateGroupModal(a)}
@@ -1879,33 +1945,46 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                         <span>Criar Grupo / Lançar</span>
                       </button>
 
-                      {confirmDeleteActivityId === a.id ? (
-                        <div className="flex items-center space-x-1">
+                      <div className="flex items-center space-x-1">
+                        {canManageMarkers && (
                           <button
                             type="button"
-                            onClick={() => handleDeleteActivity(a.id)}
-                            className="px-2 py-1 rounded bg-rose-600 text-white text-[10px] font-bold"
+                            onClick={() => openEditActivityModal(a)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-amber-500/10 transition"
+                            title="Editar atividade (Administrador)"
                           >
-                            Confirmar
+                            <Edit className="w-3.5 h-3.5" />
                           </button>
+                        )}
+
+                        {confirmDeleteActivityId === a.id ? (
+                          <div className="flex items-center space-x-1">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteActivity(a.id)}
+                              className="px-2 py-1 rounded bg-rose-600 text-white text-[10px] font-bold"
+                            >
+                              Confirmar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteActivityId(null)}
+                              className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-[10px] font-bold"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        ) : (
                           <button
                             type="button"
-                            onClick={() => setConfirmDeleteActivityId(null)}
-                            className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-[10px] font-bold"
+                            onClick={() => setConfirmDeleteActivityId(a.id)}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                            title="Excluir atividade"
                           >
-                            Cancelar
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteActivityId(a.id)}
-                          className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
-                          title="Excluir atividade"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -2070,6 +2149,50 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                             <span>{importingPdf ? 'Lendo PDF...' : 'Importar PDF'}</span>
                           </button>
                         </>
+                      )}
+
+                      {canManageMarkers && (
+                        <button
+                          type="button"
+                          onClick={() => openEditGroupModal(activeGroup)}
+                          className="px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-extrabold flex items-center space-x-1.5 transition"
+                          title="Editar informações, atividade e participantes do grupo (Administrador)"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                          <span>Editar Grupo</span>
+                        </button>
+                      )}
+
+                      {canManageMarkers && activeGroup.status === 'ENCERRADO' && (
+                        confirmReopenGroupId === activeGroup.id ? (
+                          <div className="flex items-center space-x-1 bg-amber-950/60 border border-amber-500/40 rounded-xl px-2 py-1">
+                            <span className="text-[11px] font-bold text-amber-200 px-1">Reabrir grupo?</span>
+                            <button
+                              type="button"
+                              onClick={() => handleReopenGroup(activeGroup.id)}
+                              className="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 text-[11px] font-extrabold"
+                            >
+                              Sim, Reabrir
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmReopenGroupId(null)}
+                              className="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-bold"
+                            >
+                              Não
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmReopenGroupId(activeGroup.id)}
+                            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-extrabold flex items-center space-x-1.5 transition"
+                            title="Reabrir grupo arquivado para editar lançamentos (Administrador)"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Reabrir</span>
+                          </button>
+                        )
                       )}
 
                       <button
@@ -4177,11 +4300,16 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
             <div className="flex items-center justify-between p-5 border-b border-slate-800 sticky top-0 bg-slate-900 z-10">
               <div className="flex items-center space-x-2">
                 <Target className="w-5 h-5 text-emerald-400" />
-                <h3 className="text-base font-extrabold text-white">Criar Nova Atividade de Desempenho</h3>
+                <h3 className="text-base font-extrabold text-white">
+                  {editingActivityId ? 'Editar Atividade de Desempenho' : 'Criar Nova Atividade de Desempenho'}
+                </h3>
               </div>
               <button
                 type="button"
-                onClick={() => setActivityModalOpen(false)}
+                onClick={() => {
+                  setEditingActivityId(null);
+                  setActivityModalOpen(false);
+                }}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
               >
                 <X className="w-5 h-5" />
@@ -4337,7 +4465,10 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
             <div className="flex items-center justify-end gap-2 p-4 border-t border-slate-800 sticky bottom-0 bg-slate-900">
               <button
                 type="button"
-                onClick={() => setActivityModalOpen(false)}
+                onClick={() => {
+                  setEditingActivityId(null);
+                  setActivityModalOpen(false);
+                }}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300"
               >
                 Cancelar
@@ -4348,7 +4479,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                 className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-extrabold flex items-center space-x-1.5"
               >
                 <Save className="w-4 h-4" />
-                <span>{savingActivity ? 'Criando...' : 'Criar Atividade'}</span>
+                <span>
+                  {savingActivity
+                    ? 'Salvando...'
+                    : editingActivityId
+                    ? 'Salvar Alterações'
+                    : 'Criar Atividade'}
+                </span>
               </button>
             </div>
           </form>
@@ -4367,11 +4504,18 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
             <div className="flex items-center justify-between p-5 border-b border-slate-800 sticky top-0 bg-slate-900 z-10">
               <div className="flex items-center space-x-2">
                 <Users className="w-5 h-5 text-amber-400" />
-                <h3 className="text-base font-extrabold text-white">Criar Grupo / Lançamento de Desempenho</h3>
+                <h3 className="text-base font-extrabold text-white">
+                  {editingGroupId
+                    ? 'Editar Grupo de Desempenho'
+                    : 'Criar Grupo / Lançamento de Desempenho'}
+                </h3>
               </div>
               <button
                 type="button"
-                onClick={() => setGroupModalOpen(false)}
+                onClick={() => {
+                  setEditingGroupId(null);
+                  setGroupModalOpen(false);
+                }}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
               >
                 <X className="w-5 h-5" />
@@ -4381,7 +4525,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
             <div className="p-5 space-y-4 text-xs">
               <div>
                 <label className="block font-bold text-slate-300 mb-1">Atividade *</label>
-                {atividades.length === 0 ? (
+                {atividades.length === 0 && !editingGroupId ? (
                   <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-amber-200">
                     Crie uma atividade primeiro usando o botão <strong>Nova Atividade</strong>.
                   </div>
@@ -4393,7 +4537,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       const id = e.target.value;
                       setGAtividadeId(id);
                       const found = atividades.find(a => a.id === id);
-                      if (found) {
+                      if (found && !editingGroupId) {
                         setGData(found.dataAtividade);
                         setGHora(found.horaAtividade);
                       }
@@ -4401,6 +4545,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-amber-500"
                   >
                     <option value="">Selecione a atividade...</option>
+                    {editingGroupId &&
+                      gAtividadeId &&
+                      !atividades.some(a => a.id === gAtividadeId) && (
+                        <option value={gAtividadeId}>
+                          {grupos.find(gr => gr.id === editingGroupId)?.atividadeNome || 'Atividade vinculada (arquivada)'}
+                        </option>
+                      )}
                     {atividades.map(a => (
                       <option key={a.id} value={a.id}>
                         [{a.categoria === 'FISICO' ? 'FÍSICO' : 'TÁTICO'}] {a.nome} ({formatDateBr(a.dataAtividade)}) —{' '}
@@ -4548,7 +4699,10 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
             <div className="flex items-center justify-end gap-2 p-4 border-t border-slate-800 sticky bottom-0 bg-slate-900">
               <button
                 type="button"
-                onClick={() => setGroupModalOpen(false)}
+                onClick={() => {
+                  setEditingGroupId(null);
+                  setGroupModalOpen(false);
+                }}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300"
               >
                 Cancelar
@@ -4559,7 +4713,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                 className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-extrabold flex items-center space-x-1.5"
               >
                 <Save className="w-4 h-4" />
-                <span>{savingGroup ? 'Criando...' : 'Criar Grupo e Lançar Resultados'}</span>
+                <span>
+                  {savingGroup
+                    ? 'Salvando...'
+                    : editingGroupId
+                    ? 'Salvar Alterações do Grupo'
+                    : 'Criar Grupo e Lançar Resultados'}
+                </span>
               </button>
             </div>
           </form>

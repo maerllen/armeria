@@ -5743,6 +5743,31 @@ class StorageService {
     }
   }
 
+  public async updateDesempenhoAtividade(
+    id: string,
+    payload: {
+      categoria: CategoriaDesempenho;
+      nome: string;
+      dataAtividade: string;
+      horaAtividade: string;
+      descricao: string;
+      marcadoresIds: string[];
+    }
+  ): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const res = await fetch(`/api/desempenho/atividades/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
   public async deleteDesempenhoAtividade(id: string): Promise<{ success: boolean; error?: string }> {
     try {
       const qs = new URLSearchParams();
@@ -5800,6 +5825,31 @@ class StorageService {
     }
   }
 
+  public async updateDesempenhoGrupo(
+    grupoId: string,
+    payload: {
+      atividadeId: string;
+      nomeGrupo?: string;
+      modoLancamento: 'INDIVIDUAL' | 'COLETIVO';
+      dataPrevista: string;
+      horaPrevista: string;
+      participantesIds: string[];
+    }
+  ): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const res = await fetch(`/api/desempenho/grupos/${encodeURIComponent(grupoId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
   public async saveDesempenhoGrupoResultados(
     grupoId: string,
     resultados: Array<{
@@ -5833,6 +5883,21 @@ class StorageService {
   public async encerrarDesempenhoGrupo(grupoId: string): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await fetch(`/api/desempenho/grupos/${encodeURIComponent(grupoId)}/encerrar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async reabrirDesempenhoGrupo(grupoId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/desempenho/grupos/${encodeURIComponent(grupoId)}/reabrir`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actor: this.state.currentUser })

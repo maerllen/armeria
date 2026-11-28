@@ -1328,6 +1328,115 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
     }
   });
 
+  router.put('/desempenho/atividades/:id', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      await ensureDesempenhoSchema(pool);
+
+      const actor = await resolveActorFromDb(pool, req.body?.actor?.id || req.body?.actorId);
+      if (!actor) {
+        return res.status(401).json({ error: 'Usuário não autenticado.' });
+      }
+      if (!actor.canManageMarkers) {
+        return res.status(403).json({
+          error: 'Apenas usuários com perfil Administrador podem editar atividades de desempenho.'
+        });
+      }
+
+      const id = String(req.params.id || '').trim();
+      const [rows]: any = await pool.query(
+        'SELECT * FROM DESEMPENHO_ATIVIDADES WHERE ID_ATIVIDADE = ? LIMIT 1',
+        [id]
+      );
+      if (!rows || rows.length === 0) {
+        return res.status(404).json({ error: 'Atividade não encontrada.' });
+      }
+      const existing = rows[0];
+      if (!actor.isGeral && existing.DEPARTAMENTO_ID && actor.departmentId && existing.DEPARTAMENTO_ID !== actor.departmentId) {
+        return res.status(403).json({ error: 'Sem permissão para editar atividades de outro departamento.' });
+      }
+
+      const categoria = String(req.body?.categoria || existing.CATEGORIA || '').trim().toUpperCase();
+      if (!VALID_CATEGORIAS.has(categoria)) {
+        return res.status(400).json({ error: 'Categoria da atividade inválida (FISICO ou TATICO).' });
+      }
+
+      const nome = String(req.body?.nome || '').trim();
+      if (!nome || nome.length > 200) {
+        return res.status(400).json({ error: 'Informe o nome da atividade (máximo 200 caracteres).' });
+      }
+
+      const dataAtividade = String(req.body?.dataAtividade || '').trim();
+      if (!isValidIsoDate(dataAtividade)) {
+        return res.status(400).json({ error: 'Data da atividade inválida.' });
+      }
+
+      const horaAtividade = String(req.body?.horaAtividade || '08:00').trim();
+      if (!isValidTimeHHMM(horaAtividade)) {
+        return res.status(400).json({ error: 'Hora da atividade inválida (use HH:mm).' });
+      }
+
+      const descricao = String(req.body?.descricao || '').trim();
+      if (!descricao) {
+        return res.status(400).json({ error: 'Informe a descrição da atividade.' });
+      }
+      if (descricao.length > 500) {
+        return res.status(400).json({ error: 'A descrição da atividade deve ter no máximo 500 caracteres.' });
+      }
+
+      const rawMarcadoresIds: string[] = Array.isArray(req.body?.marcadoresIds)
+        ? Array.from(new Set(req.body.marcadoresIds.map((x: any) => String(x || '').trim()).filter(Boolean)))
+        : [];
+      if (rawMarcadoresIds.length === 0) {
+        return res.status(400).json({ error: 'Selecione ao menos um marcador para a atividade.' });
+      }
+
+      const mp = rawMarcadoresIds.map(() => '?').join(',');
+      const [validMarcs]: any = await pool.query(
+        `SELECT ID_MARCADOR, CATEGORIA FROM DESEMPENHO_MARCADORES WHERE ID_MARCADOR IN (${mp})`,
+        rawMarcadoresIds
+      );
+      if (!validMarcs || validMarcs.length !== rawMarcadoresIds.length) {
+        return res.status(400).json({ error: 'Um ou mais marcadores selecionados são inválidos.' });
+      }
+      const wrongCat = validMarcs.find((m: any) => String(m.CATEGORIA) !== categoria);
+      if (wrongCat) {
+        return res.status(400).json({ error: 'Todos os marcadores selecionados devem pertencer à mesma categoria da atividade.' });
+      }
+
+      await pool.query(
+        `UPDATE DESEMPENHO_ATIVIDADES
+            SET CATEGORIA = ?, NOME = ?, DATA_ATIVIDADE = ?, HORA_ATIVIDADE = ?, DESCRICAO = ?
+          WHERE ID_ATIVIDADE = ?`,
+        [categoria, nome, dataAtividade, horaAtividade, descricao, id]
+      );
+
+      await pool.query('DELETE FROM DESEMPENHO_ATIVIDADE_MARCADORES WHERE ID_ATIVIDADE = ?', [id]);
+      for (let i = 0; i < rawMarcadoresIds.length; i++) {
+        await pool.query(
+          'INSERT INTO DESEMPENHO_ATIVIDADE_MARCADORES (ID_ATIVIDADE, ID_MARCADOR, ORDEM) VALUES (?, ?, ?)',
+          [id, rawMarcadoresIds[i], i]
+        );
+      }
+
+      if (String(existing.CATEGORIA) !== categoria) {
+        await pool.query('UPDATE DESEMPENHO_GRUPOS SET CATEGORIA = ? WHERE ID_ATIVIDADE = ?', [categoria, id]);
+      }
+
+      await insertAuditLog(
+        'Relatórios',
+        'Editar Atividade de Desempenho',
+        `Atividade "${nome}" (${categoria} • ${dataAtividade} ${horaAtividade}) atualizada com ${rawMarcadoresIds.length} marcador(es) por ${actor.name}`,
+        { id: actor.id, name: actor.name, masp: actor.masp, role: actor.primaryRole },
+        req.ip
+      );
+
+      return res.json({ success: true, id });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Erro ao editar atividade.' });
+    }
+  });
+
   router.delete('/desempenho/atividades/:id', async (req: Request, res: Response) => {
     try {
       const pool = getPool();
@@ -1658,6 +1767,200 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
     }
   });
 
+  router.put('/desempenho/grupos/:id', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      await ensureDesempenhoSchema(pool);
+
+      const actor = await resolveActorFromDb(pool, req.body?.actor?.id || req.body?.actorId);
+      if (!actor) {
+        return res.status(401).json({ error: 'Usuário não autenticado.' });
+      }
+      if (!actor.canManageMarkers) {
+        return res.status(403).json({
+          error: 'Apenas usuários com perfil Administrador podem editar informações de grupos.'
+        });
+      }
+
+      const grupoId = String(req.params.id || '').trim();
+      const [grpRows]: any = await pool.query(
+        'SELECT * FROM DESEMPENHO_GRUPOS WHERE ID_GRUPO = ? LIMIT 1',
+        [grupoId]
+      );
+      if (!grpRows || grpRows.length === 0) {
+        return res.status(404).json({ error: 'Grupo não encontrado.' });
+      }
+      const existingGrp = grpRows[0];
+      if (
+        !actor.isGeral &&
+        existingGrp.DEPARTAMENTO_ID &&
+        actor.departmentId &&
+        String(existingGrp.DEPARTAMENTO_ID) !== String(actor.departmentId)
+      ) {
+        return res.status(403).json({ error: 'Sem permissão para editar grupos de outro departamento.' });
+      }
+
+      const atividadeId = String(req.body?.atividadeId || existingGrp.ID_ATIVIDADE || '').trim();
+      const [actRows]: any = await pool.query(
+        'SELECT * FROM DESEMPENHO_ATIVIDADES WHERE ID_ATIVIDADE = ? LIMIT 1',
+        [atividadeId]
+      );
+      if (!actRows || actRows.length === 0) {
+        return res.status(404).json({ error: 'Atividade selecionada não encontrada.' });
+      }
+      const act = actRows[0];
+      if (
+        !actor.isGeral &&
+        act.DEPARTAMENTO_ID &&
+        actor.departmentId &&
+        String(act.DEPARTAMENTO_ID) !== String(actor.departmentId)
+      ) {
+        return res.status(403).json({ error: 'Sem permissão para vincular atividade de outro departamento.' });
+      }
+
+      const rawPartIds: string[] = Array.isArray(req.body?.participantesIds)
+        ? Array.from(new Set(req.body.participantesIds.map((x: any) => String(x || '').trim()).filter(Boolean)))
+        : [];
+      if (rawPartIds.length === 0) {
+        return res.status(400).json({ error: 'Selecione ao menos um policial participante.' });
+      }
+
+      const modoRaw = String(req.body?.modoLancamento || '').trim().toUpperCase();
+      const modoLancamento = VALID_MODOS.has(modoRaw)
+        ? modoRaw
+        : rawPartIds.length === 1
+        ? 'INDIVIDUAL'
+        : 'COLETIVO';
+
+      const dataPrevista = String(req.body?.dataPrevista || existingGrp.DATA_PREVISTA || '').trim();
+      if (!isValidIsoDate(dataPrevista)) {
+        return res.status(400).json({ error: 'Data prevista inválida.' });
+      }
+      const horaPrevista = String(req.body?.horaPrevista || existingGrp.HORA_PREVISTA || '08:00').trim();
+      if (!isValidTimeHHMM(horaPrevista)) {
+        return res.status(400).json({ error: 'Hora prevista inválida.' });
+      }
+
+      const up = rawPartIds.map(() => '?').join(',');
+      const [userRows]: any = await pool.query(
+        `SELECT u.ID_USUARIOS, u.NOME_USUARIOS, u.MASP_USUARIOS, u.CARGO_USUARIOS,
+                u.UNIDADE_ID_USUARIOS, u.DEPARTAMENTO_ID_USUARIOS, un.NOME_UNIDADES
+           FROM USUARIOS u
+           LEFT JOIN UNIDADES un ON un.ID_UNIDADES = u.UNIDADE_ID_USUARIOS
+          WHERE u.ID_USUARIOS IN (${up})`,
+        rawPartIds
+      );
+      if (!userRows || userRows.length === 0) {
+        return res.status(400).json({ error: 'Nenhum usuário válido encontrado para o grupo.' });
+      }
+
+      const accessibleUnitIds = await getAccessibleUnitIds(pool, actor);
+      if (accessibleUnitIds !== null) {
+        const unauthorized = userRows.find(
+          (u: any) =>
+            u.UNIDADE_ID_USUARIOS &&
+            !accessibleUnitIds.includes(String(u.UNIDADE_ID_USUARIOS)) &&
+            String(u.DEPARTAMENTO_ID_USUARIOS || '') !== String(actor.departmentId || '')
+        );
+        if (unauthorized) {
+          return res.status(403).json({
+            error: `O usuário "${unauthorized.NOME_USUARIOS}" pertence a uma unidade fora do seu escopo de acesso.`
+          });
+        }
+      }
+
+      const nomeGrupo =
+        String(req.body?.nomeGrupo || '').trim().slice(0, 220) ||
+        `${act.NOME} — ${modoLancamento === 'INDIVIDUAL' ? userRows[0].NOME_USUARIOS : `Grupo (${userRows.length} policiais)`}`;
+
+      await pool.query(
+        `UPDATE DESEMPENHO_GRUPOS
+            SET ID_ATIVIDADE = ?, NOME_GRUPO = ?, CATEGORIA = ?, MODO_LANCAMENTO = ?,
+                DATA_PREVISTA = ?, HORA_PREVISTA = ?
+          WHERE ID_GRUPO = ?`,
+        [atividadeId, nomeGrupo, act.CATEGORIA, modoLancamento, dataPrevista, horaPrevista, grupoId]
+      );
+
+      // Sync participants while preserving existing results for kept participants
+      const [currentPartRows]: any = await pool.query(
+        'SELECT USUARIO_ID FROM DESEMPENHO_GRUPO_USUARIOS WHERE ID_GRUPO = ?',
+        [grupoId]
+      );
+      const validIdsSet = new Set(userRows.map((u: any) => String(u.ID_USUARIOS)));
+      const currentIdsSet = new Set((currentPartRows || []).map((r: any) => String(r.USUARIO_ID)));
+
+      for (const oldUid of currentIdsSet) {
+        if (!validIdsSet.has(oldUid)) {
+          await pool.query(
+            'DELETE FROM DESEMPENHO_GRUPO_USUARIOS WHERE ID_GRUPO = ? AND USUARIO_ID = ?',
+            [grupoId, oldUid]
+          );
+          await pool.query(
+            'DELETE FROM DESEMPENHO_RESULTADOS WHERE ID_GRUPO = ? AND USUARIO_ID = ?',
+            [grupoId, oldUid]
+          );
+        }
+      }
+
+      for (const u of userRows) {
+        const uid = String(u.ID_USUARIOS);
+        if (currentIdsSet.has(uid)) {
+          await pool.query(
+            `UPDATE DESEMPENHO_GRUPO_USUARIOS
+                SET USUARIO_NOME = ?, USUARIO_MASP = ?, USUARIO_CARGO = ?,
+                    USUARIO_UNIDADE_ID = ?, USUARIO_UNIDADE_NOME = ?
+              WHERE ID_GRUPO = ? AND USUARIO_ID = ?`,
+            [
+              String(u.NOME_USUARIOS || ''),
+              u.MASP_USUARIOS ? String(u.MASP_USUARIOS) : null,
+              u.CARGO_USUARIOS ? String(u.CARGO_USUARIOS) : null,
+              u.UNIDADE_ID_USUARIOS ? String(u.UNIDADE_ID_USUARIOS) : null,
+              u.NOME_UNIDADES ? String(u.NOME_UNIDADES) : null,
+              grupoId,
+              uid
+            ]
+          );
+        } else {
+          await pool.query(
+            `INSERT INTO DESEMPENHO_GRUPO_USUARIOS (
+              ID_GRUPO, USUARIO_ID, USUARIO_NOME, USUARIO_MASP, USUARIO_CARGO,
+              USUARIO_UNIDADE_ID, USUARIO_UNIDADE_NOME
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              grupoId,
+              uid,
+              String(u.NOME_USUARIOS || ''),
+              u.MASP_USUARIOS ? String(u.MASP_USUARIOS) : null,
+              u.CARGO_USUARIOS ? String(u.CARGO_USUARIOS) : null,
+              u.UNIDADE_ID_USUARIOS ? String(u.UNIDADE_ID_USUARIOS) : null,
+              u.NOME_UNIDADES ? String(u.NOME_UNIDADES) : null
+            ]
+          );
+        }
+      }
+
+      // Keep already-saved results synchronized with updated group activity/date/time
+      await pool.query(
+        `UPDATE DESEMPENHO_RESULTADOS
+            SET ID_ATIVIDADE = ?, CATEGORIA = ?, DATA_AVALIACAO = ?, HORA_AVALIACAO = ?
+          WHERE ID_GRUPO = ?`,
+        [atividadeId, act.CATEGORIA, dataPrevista, horaPrevista, grupoId]
+      );
+
+      await insertAuditLog(
+        'Relatórios',
+        'Editar Grupo de Desempenho',
+        `Grupo "${nomeGrupo}" (${modoLancamento} • ${dataPrevista} ${horaPrevista}) atualizado com ${userRows.length} participante(s) por ${actor.name}`,
+        { id: actor.id, name: actor.name, masp: actor.masp, role: actor.primaryRole },
+        req.ip
+      );
+
+      return res.json({ success: true, id: grupoId });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Erro ao editar grupo de avaliação.' });
+    }
+  });
+
   router.put('/desempenho/grupos/:id/resultados', async (req: Request, res: Response) => {
     try {
       const pool = getPool();
@@ -1981,6 +2284,64 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
       return res.json({ success: true });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || 'Erro ao encerrar grupo.' });
+    }
+  });
+
+  router.put('/desempenho/grupos/:id/reabrir', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      await ensureDesempenhoSchema(pool);
+
+      const actor = await resolveActorFromDb(pool, req.body?.actor?.id || req.body?.actorId);
+      if (!actor) {
+        return res.status(401).json({ error: 'Usuário não autenticado.' });
+      }
+      if (!actor.canManageMarkers) {
+        return res.status(403).json({
+          error: 'Apenas usuários com perfil Administrador podem reabrir grupos arquivados.'
+        });
+      }
+
+      const grupoId = String(req.params.id || '').trim();
+      const [grpRows]: any = await pool.query(
+        'SELECT * FROM DESEMPENHO_GRUPOS WHERE ID_GRUPO = ? LIMIT 1',
+        [grupoId]
+      );
+      if (!grpRows || grpRows.length === 0) {
+        return res.status(404).json({ error: 'Grupo não encontrado.' });
+      }
+      const grp = grpRows[0];
+      if (
+        !actor.isGeral &&
+        grp.DEPARTAMENTO_ID &&
+        actor.departmentId &&
+        String(grp.DEPARTAMENTO_ID) !== String(actor.departmentId)
+      ) {
+        return res.status(403).json({ error: 'Sem permissão para reabrir grupos de outro departamento.' });
+      }
+
+      if (String(grp.STATUS) === 'ABERTO') {
+        return res.json({ success: true, alreadyOpen: true });
+      }
+
+      await pool.query(
+        `UPDATE DESEMPENHO_GRUPOS
+            SET STATUS = 'ABERTO', ENCERRADO_EM = NULL, ENCERRADO_POR_ID = NULL, ENCERRADO_POR_NOME = NULL
+          WHERE ID_GRUPO = ?`,
+        [grupoId]
+      );
+
+      await insertAuditLog(
+        'Relatórios',
+        'Reabrir Grupo de Desempenho',
+        `Grupo arquivado "${grp.NOME_GRUPO}" reaberto para edição por ${actor.name}`,
+        { id: actor.id, name: actor.name, masp: actor.masp, role: actor.primaryRole },
+        req.ip
+      );
+
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Erro ao reabrir grupo.' });
     }
   });
 
